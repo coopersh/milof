@@ -1,0 +1,17 @@
+[project]
+name = "milof"
+version = "0.0.1"
+description = "Vision-based inspection support for the Milouf poultry slaughter line"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+camera = ["pypylon"]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["acquisition", "labeling", "models", "review"]

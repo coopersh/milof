@@ -1,0 +1,20 @@
+# Basler line-scan acquisition settings — fill in once the site is measured
+# (docs/line_requirements.md).
+camera:
+  model: TBD
+  serial: null
+  line_rate_hz: 1600        # estimate for 6" shackle pitch at 156 birds/min
+  trigger: encoder          # encoder | free_run (free_run only for bench tests)
+  exposure_us: null
+  width_px: null
+
+segmentation:
+  # How the continuous stream is cut into one image per bird
+  method: gap               # gap (background between birds) | shackle
+  min_bird_lines: 300
+  max_bird_lines: 1200
+
+storage:
+  data_dir: ./data          # daily subfolders YYYYMMDD
+  image_format: jpg
+  jpeg_quality: 92

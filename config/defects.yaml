@@ -1,0 +1,17 @@
+# Defect categories — single source of truth for labelling, training and reports.
+# Thresholds are placeholders until agreed with the veterinary services (docs/defects.md).
+defects:
+  - id: wing_fracture
+    name_he: שבר כנף
+    action: TBD
+  - id: bruise
+    name_he: שטף דם
+    action: TBD
+    min_area_mm2: null
+  - id: skin_defect
+    name_he: פגם עור
+    action: TBD
+  - id: fecal_contamination
+    name_he: זיהום צואתי
+    action: TBD
+    exploratory: true   # RGB-only detection; not held to the same bar in phase 1
