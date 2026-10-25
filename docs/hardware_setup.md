@@ -46,25 +46,48 @@ camera M8 6-pin ──Power-I/O cable (open wires)──> encoder / photo-sensor
 
 ## Optics
 
-Sensor: 4096 px. Assuming 3.5 µm pixels (≈14.3 mm line — **verify in the racer 2 S
-datasheet**), field of view ≈ 14.3 mm × distance / focal length:
+Sensor: 4096 px × 3.5 µm ≈ 14.3 mm line. Field of view ≈ 14.3 mm × distance / focal length.
+Working distances from the rig design (engineer):
 
-| Lens | FOV per 10 cm distance | Distance for ~550 mm FOV |
-|---|---|---|
-| 8.5 mm | ~169 mm | ~33 cm |
-| 12 mm | ~119 mm | ~46 cm |
+| Item | Working distance | FOV | Resolution |
+|---|---|---|---|
+| Lens 8.5 mm | 293 mm | ~493 mm | ~0.12 mm/px |
+| **Lens 12 mm** (mounted) | **414 mm** | ~494 mm | ~0.12 mm/px |
+| Light bars (collimated diffuser) | 150 mm nominal; **tilted 15° in the rig to converge at ~450 mm from the lens** (not shown in the CAD model) | | |
+
+Both lenses were sized for the same ~0.5 m FOV, so magnification and depth of field are the
+same — the choice is about space: 12 mm keeps the camera further from splash and matches the
+light convergence point, so it is the intended lens.
 
 Mount the camera so the **sensor line is vertical** (along the hanging bird); the bird
-moves horizontally through it. At 550 mm FOV → **~0.13 mm/pixel**.
+moves horizontally through it. Place the bird's near surface at ~414–450 mm (between lens
+focus and light convergence) and focus at ~430 mm.
+
+### Depth of field — the real constraint
+
+Birds are 3D and swing on the shackles. Approximate depth of field at ~420 mm
+(circle of confusion ≈ 2 px = 7 µm):
+
+| Aperture | In focus |
+|---|---|
+| f/2 | ±16 mm |
+| f/4 | ±33 mm |
+| f/5.6 | ±47 mm |
+| f/8 | ±70 mm |
+
+f/2 is too shallow for a carcass. Start at **f/4–f/5.6**; every stop down halves the
+light, and at ~3,300 lines/s the exposure per line is at most ~300 µs — check image
+brightness with both light bars at full power. A guide rail that stops birds swinging
+toward/away from the camera helps more than any lens setting.
 
 After focusing at the real working distance, lock the lens rings with their set screws.
 
 ## Line rate and data volume (assuming 6" shackle pitch, 156 birds/min)
 
-- Conveyor ≈ 0.40 m/s. Square pixels at 0.13 mm → **~3,000 lines/s**
+- Conveyor ≈ 0.40 m/s. Square pixels at 0.12 mm → **~3,300 lines/s**
   (camera max 14 kHz).
-- ~1,100 lines per shackle pitch → one bird image ≈ 4096 × 1,100 px.
-- Raw RGB ≈ 37 MB/s (fits GigE, ~115 MB/s usable). JPEG ≈ 1–1.5 MB/bird →
+- ~1,250 lines per shackle pitch → one bird image ≈ 4096 × 1,250 px.
+- Raw RGB ≈ 40 MB/s (fits GigE, ~115 MB/s usable). JPEG ≈ 1–1.5 MB/bird →
   **~70–100 GB per 8 h shift**. Plan a 4 TB data SSD.
 
 ## Line trigger
@@ -80,7 +103,7 @@ travelled, not time.
 
 ## Open items
 
-- Working distance camera → bird (decides the lens).
-- Shackle pitch.
+- Shackle pitch (sets line rate and lines per bird).
+- Can a guide rail limit bird swing in front of the camera?
 - Encoder: available / can be fitted?
 - PC location relative to the camera (cable length).
