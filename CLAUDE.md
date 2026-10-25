@@ -17,9 +17,11 @@ veterinary regulation requires the human decision.
 
 - **156 birds/min** ≈ 2.6 birds/s ≈ **385 ms per bird**.
 - **One side only** is visible to the camera.
-- Camera: **Basler line-scan** (model TBD). The 2D image is built line by line as the shackle
-  line moves past, so line triggering must follow conveyor speed (encoder) — otherwise speed
-  changes stretch/compress the image.
+- Camera: **Basler racer 2 S r2L4096-14gc** — 4k colour line-scan, GigE (PoE), 12 mm or
+  8.5 mm lens, two 500 mm IP67 light bars. The 2D image is built line by line as the shackle
+  line moves past, so line triggering should follow conveyor speed (encoder) — otherwise speed
+  changes stretch/compress the image. No encoder is fitted yet (free-run for now).
+- Rig BOM, wiring, optics: `docs/hardware_setup.md`.
 - Shackle pitch, camera distance, encoder availability: **TBD** — see `docs/line_requirements.md`.
 
 ## Target defects (phase 1)

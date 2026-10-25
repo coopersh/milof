@@ -1,18 +1,20 @@
 # Basler line-scan acquisition settings — fill in once the site is measured
 # (docs/line_requirements.md).
 camera:
-  model: TBD
+  model: r2L4096-14gc       # Basler racer 2 S, 4k colour line-scan, GigE
   serial: null
-  line_rate_hz: 1600        # estimate for 6" shackle pitch at 156 birds/min
-  trigger: encoder          # encoder | free_run (free_run only for bench tests)
+  ip: 192.168.10.2
+  lens_mm: 12               # 12 (C11-1220-12M) or 8.5 (C11-0824-12M), see docs/hardware_setup.md
+  line_rate_hz: 3000        # square ~0.13 mm pixels at 0.40 m/s (6" pitch, 156 birds/min); max 14000
+  trigger: free_run         # encoder | free_run — no encoder fitted yet
   exposure_us: null
-  width_px: null
+  width_px: 4096
 
 segmentation:
   # How the continuous stream is cut into one image per bird
   method: gap               # gap (background between birds) | shackle
-  min_bird_lines: 300
-  max_bird_lines: 1200
+  min_bird_lines: 500
+  max_bird_lines: 2000      # ~1100 lines per shackle pitch at 3 kHz
 
 storage:
   data_dir: ./data          # daily subfolders YYYYMMDD

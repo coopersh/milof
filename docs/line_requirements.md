@@ -6,7 +6,7 @@
 |---|---|
 | Line speed | 156 birds/min (2.6 /s, ~385 ms per bird) |
 | View | One side only |
-| Camera | Basler line-scan, colour (model TBD) |
+| Camera | Basler racer 2 S r2L4096-14gc (4k colour line-scan, GigE) — see `hardware_setup.md` |
 
 ## To measure on site
 
