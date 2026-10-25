@@ -12,8 +12,8 @@
 | 2 | Foil bracket set + collimated diffuser foil, Bar 10×500 | Even, directed light on the line |
 | 2 | M8 cable 2 m, tilted | Light bar power |
 | 1 | Mean Well RSP-200 | 24 VDC supply for the light bars |
-| 1 | Basler lens C11-0824-12M (8.5 mm) | Lens option — short working distance |
-| 1 | Basler lens C11-1220-12M (12 mm) | Lens option — longer working distance (currently mounted) |
+| 1 | Basler lens C11-0824-12M (8.5 mm) | Spare lens option — same FOV at 293 mm |
+| 1 | Basler lens C11-1220-12M (12 mm) | **Initial setup lens** — 450 mm to bird |
 | — | Aluminium profiles (4×400, 2×340, 4×900, 1×550, 4×2500, 6×620 mm) | Frame |
 
 **Not in the BOM: an encoder.** See "Line trigger" below.
@@ -44,50 +44,73 @@ camera M8 6-pin ──Power-I/O cable (open wires)──> encoder / photo-sensor
    IP, e.g. `192.168.10.2`.
 4. Open **pylon Viewer**, confirm the model reads `r2L4096-14gc`, grab test lines.
 
-## Optics
+## Optics — initial setup (as in the CAD drawing)
 
-Sensor: 4096 px × 3.5 µm ≈ 14.3 mm line. Field of view ≈ 14.3 mm × distance / focal length.
-Working distances from the rig design (engineer):
+Top view, scan line vertical (out of the drawing), birds move across it:
 
-| Item | Working distance | FOV | Resolution |
-|---|---|---|---|
-| Lens 8.5 mm | 293 mm | ~493 mm | ~0.12 mm/px |
-| **Lens 12 mm** (mounted) | **414 mm** | ~494 mm | ~0.12 mm/px |
-| Light bars (collimated diffuser) | 150 mm nominal; **tilted 15° in the rig to converge at ~450 mm from the lens** (not shown in the CAD model) | | |
+```
+            camera + 12 mm lens
+                   │
+                   │ 450 mm  (lens front → bird)
+                   │
+   light bar ┐     │     ┌ light bar      ← lights at the ends of the two arms,
+              ╲ 15°│15° ╱                   ~40 mm either side of the camera axis
+         150 mm╲   │   ╱
+                ╲  │  ╱
+                 ╲ │ ╱
+  ───────────────── ● ─────────────────  bird surface (scan line)
+```
 
-Both lenses were sized for the same ~0.5 m FOV, so magnification and depth of field are the
-same — the choice is about space: 12 mm keeps the camera further from splash and matches the
-light convergence point, so it is the intended lens.
+| Item | Value |
+|---|---|
+| Lens | **12 mm** (C11-1220-12M) |
+| Lens front → bird | **450 mm** |
+| Light bars → bird | **150 mm** (their nominal working distance) |
+| Light tilt | **15°** inward, converging on the camera axis at the bird |
+| Light offset from camera axis | 150 × tan 15° ≈ **40 mm** each side |
+| Field of view (along bird height) | ~14.3 mm × 450 / 12 ≈ **~535 mm** |
+| Resolution | ~**0.13 mm/px** |
 
-Mount the camera so the **sensor line is vertical** (along the hanging bird); the bird
-moves horizontally through it. Place the bird's near surface at ~414–450 mm (between lens
-focus and light convergence) and focus at ~430 mm.
+Sensor: 4096 px × 3.5 µm ≈ 14.3 mm line. The 8.5 mm lens (design WD 293 mm) gives the
+same FOV closer in; it is the spare option if space is short.
 
-### Depth of field — the real constraint
+Mount the camera so the **sensor line is vertical** (along the hanging bird).
 
-Birds are 3D and swing on the shackles. Approximate depth of field at ~420 mm
-(circle of confusion ≈ 2 px = 7 µm):
+### Depth tolerance — the real constraint
+
+Birds are 3D and swing on the shackles. Two things limit how far the bird surface can
+move toward/away from the camera:
+
+**Focus** (at 450 mm, circle of confusion ≈ 2 px = 7 µm):
 
 | Aperture | In focus |
 |---|---|
-| f/2 | ±16 mm |
-| f/4 | ±33 mm |
-| f/5.6 | ±47 mm |
-| f/8 | ±70 mm |
+| f/2 | ±17 mm |
+| f/4 | ±40 mm |
+| f/5.6 | ±55 mm |
 
-f/2 is too shallow for a carcass. Start at **f/4–f/5.6**; every stop down halves the
-light, and at ~3,300 lines/s the exposure per line is at most ~300 µs — check image
-brightness with both light bars at full power. A guide rail that stops birds swinging
-toward/away from the camera helps more than any lens setting.
+**Light stripe.** With collimated diffusers each bar throws a narrow stripe that hits the
+scan line only at the 150 mm convergence plane. A surface Δ mm off that plane sees each
+stripe shifted by Δ × tan 15° ≈ 0.27 Δ — e.g. ±40 mm depth → ~11 mm off the scan line,
+so the image darkens. Check this on the bench: move a target ±20/40/60 mm and watch the
+brightness.
 
-After focusing at the real working distance, lock the lens rings with their set screws.
+Start at **f/4**; every stop down halves the light, and at ~3,000 lines/s the exposure
+per line is at most ~330 µs. A guide rail that stops birds swinging toward/away from the
+camera helps more than any lens or light setting.
+
+**Glare.** Lights only ~15° off the camera axis means wet skin facing the camera
+reflects them straight back (bright streaks). If it saturates, add a polariser pair
+(film on the bars, polariser on the lens) or increase the tilt.
+
+After focusing at 450 mm, lock the lens rings with their set screws.
 
 ## Line rate and data volume (assuming 6" shackle pitch, 156 birds/min)
 
-- Conveyor ≈ 0.40 m/s. Square pixels at 0.12 mm → **~3,300 lines/s**
+- Conveyor ≈ 0.40 m/s. Square pixels at 0.13 mm → **~3,000 lines/s**
   (camera max 14 kHz).
-- ~1,250 lines per shackle pitch → one bird image ≈ 4096 × 1,250 px.
-- Raw RGB ≈ 40 MB/s (fits GigE, ~115 MB/s usable). JPEG ≈ 1–1.5 MB/bird →
+- ~1,150 lines per shackle pitch → one bird image ≈ 4096 × 1,150 px.
+- Raw RGB ≈ 37 MB/s (fits GigE, ~115 MB/s usable). JPEG ≈ 1–1.5 MB/bird →
   **~70–100 GB per 8 h shift**. Plan a 4 TB data SSD.
 
 ## Line trigger

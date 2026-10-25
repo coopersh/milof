@@ -4,9 +4,9 @@ camera:
   model: r2L4096-14gc       # Basler racer 2 S, 4k colour line-scan, GigE
   serial: null
   ip: 192.168.10.2
-  lens_mm: 12               # C11-1220-12M at 414 mm working distance (alt: 8.5 mm at 293 mm)
+  lens_mm: 12               # C11-1220-12M, lens front 450 mm from bird; lights 150 mm, 15° tilt
   aperture: 4               # f/4–5.6 for depth of field, see docs/hardware_setup.md
-  line_rate_hz: 3300        # square ~0.12 mm pixels at 0.40 m/s (6" pitch, 156 birds/min); max 14000
+  line_rate_hz: 3000        # square ~0.13 mm pixels at 0.40 m/s (6" pitch, 156 birds/min); max 14000
   trigger: free_run         # encoder | free_run — no encoder fitted yet
   exposure_us: null
   width_px: 4096
