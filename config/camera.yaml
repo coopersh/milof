@@ -1,23 +1,35 @@
-# Basler line-scan acquisition settings — fill in once the site is measured
-# (docs/line_requirements.md).
+# Basler line-scan acquisition settings (docs/hardware_setup.md, docs/line_requirements.md).
 camera:
   model: r2L4096-14gc       # Basler racer 2 S, 4k colour line-scan, GigE
-  serial: null
+  serial: null              # pick a specific camera; null = by ip, else first found
   ip: 192.168.10.2
   lens_mm: 12               # C11-1220-12M, lens front 450 mm from bird; lights 150 mm, 15° tilt
   aperture: 4               # f/4–5.6 for depth of field, see docs/hardware_setup.md
   line_rate_hz: 3000        # square ~0.13 mm pixels at 0.40 m/s (6" pitch, 156 birds/min); max 14000
-  trigger: free_run         # encoder | free_run — no encoder fitted yet
-  exposure_us: null
+  lines_per_frame: 256      # lines per GigE frame; the stream is reassembled in software
+  trigger: free_run         # free_run only — no encoder fitted yet
+  exposure_us: null         # null = keep camera value; must be < 1e6 / line_rate_hz
   width_px: 4096
+  pixel_format: RGB8
 
 segmentation:
-  # How the continuous stream is cut into one image per bird
-  method: gap               # gap (background between birds) | shackle
-  min_bird_lines: 500
-  max_bird_lines: 2000      # ~1100 lines per shackle pitch at 3 kHz
+  # Birds overlap on the line, so there is no gap to cut on. Each bird is cut as a fixed
+  # window around a predicted centre one period apart; the centre is corrected from the
+  # per-line brightness profile so the cut follows small line-speed drift (free-run).
+  method: periodic          # periodic (one image per bird) | tiles (bench: fixed chunks)
+  birds_per_min: 156
+  period_lines: null        # null = line_rate_hz * 60 / birds_per_min (~1154 at 3 kHz)
+  window_factor: 1.5        # window = 1.5 periods, so overlapping neighbours stay in frame
+  track_gain: 0.3           # phase correction per bird; 0 = fixed period, no tracking
+  min_contrast: 2.0         # profile contrast (grey levels) below which no correction is made
+  profile_sign: 1           # 1 = birds brighter than background (lights fall off behind them)
+  tile_lines: 2000
 
 storage:
   data_dir: ./data          # daily subfolders YYYYMMDD
   image_format: jpg
   jpeg_quality: 92
+  rotate: true              # save birds upright (sensor line vertical → image rows)
+  flip_vertical: false      # set on site once the mounting direction is known
+  flip_horizontal: false
+  queue_size: 16            # images waiting to be written; when full, new ones are dropped

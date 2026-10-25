@@ -122,7 +122,11 @@ travelled, not time.
   (racer 2 S supports encoder input). Must be bought and fitted.
 - **Phase-1 fallback:** free-run at a fixed line rate. Works if the line runs at a
   steady speed; speed changes stretch/compress birds. Acceptable for data collection,
-  not for measuring defect size.
+  not for measuring defect size. The segmenter tracks the bird period from the image
+  itself, so slow drift does not lose birds.
+- **Cheap upgrade:** a photo-sensor on the shackles wired to a camera input gives an
+  exact "bird here" mark per shackle — better bird cutting than image-based tracking
+  when birds overlap heavily.
 
 ## Open items
 

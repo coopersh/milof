@@ -45,6 +45,12 @@ veterinary services. Code must read categories from `config/defects.yaml`, never
 Phase 1 does **not** need carcass identification: it is enough to show a defect was found on
 *a* bird. Each bird is a separate image cut from the continuous line-scan stream.
 
+**Birds overlap on the line** — there is no background gap between them. Segmentation
+(`acquisition/segmenter.py`) therefore cuts a fixed window (1.5 periods) around a predicted
+centre one bird-period apart, and corrects each centre from the per-line brightness
+profile so the cut follows line-speed drift (free-run has no encoder; a 0.5% speed error
+would otherwise slip a bird every 200). Neighbours appear at the window edges by design.
+
 ## Architecture (phase 1)
 
 ```
@@ -66,8 +72,27 @@ docs/    defect definitions, line requirements
 - Inspector input (button press on condemnation) is the ground-truth signal — log it with a
   timestamp so it can be matched to the bird image.
 
+## Running acquisition
+
+```bash
+python -m acquisition calibrate --sim          # measured bird period vs config
+python -m acquisition capture --sim --seconds 20
+python -m acquisition capture                  # real camera (needs pypylon: pip install -e ".[camera]")
+python -m acquisition capture --mode tiles     # bench: fixed chunks, no bird cutting
+```
+
+Output: `data/YYYYMMDD/images/*.jpg` + `data/YYYYMMDD/capture_log.csv` (one row per image:
+start line, profile contrast, tracking error, current period).
+
+Threads: capture loop (grab → segment) on the main thread; `AsyncWriter` thread does
+rotation, JPEG encoding and disk I/O. `submit()` never blocks — a full queue drops and
+counts the image.
+
 ## Testing
 
 ```bash
 pytest tests/
 ```
+
+Tests run on `SimulatedLineScan` (overlapping synthetic birds, configurable speed error) —
+no camera or pypylon needed.
