@@ -5,7 +5,7 @@ description = "Vision-based inspection support for the Milouf poultry slaughter 
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
-    "opencv-python",
+    "opencv-python-headless",
     "pyyaml",
 ]
 
