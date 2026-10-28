@@ -8,6 +8,7 @@ Status: **phase 1 — feasibility** (data collection, labelling, retrospective d
 
 - `docs/defects.md` — defect definitions (to agree with the vets)
 - `docs/line_requirements.md` — site measurements still needed
+- `docs/SYSTEM_DESIGN.md` — system design (capture → offline segmentation → labelling → models)
 - `CLAUDE.md` — architecture and design rules
 
 ```bash
