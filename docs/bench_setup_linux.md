@@ -105,6 +105,25 @@ python -m acquisition capture --mode tiles --seconds 10
 ls data/*/images | head
 ```
 
+## Without a camera: pylon camera emulator
+
+pylon (and pypylon) include a software camera. With `PYLON_CAMEMU=1` set, an
+"Emulation" camera appears in pylon Viewer and to milof, which picks it when the real
+camera is not found. It is a generic area-scan camera, so the line-scan settings
+(`AcquisitionLineRate`, `LineStart` trigger, `RGB8`) log "could not set" warnings; the
+grab → tiles → writer path runs for real. It free-runs much faster than the real
+camera, so "writer queue full, dropped" warnings are expected here.
+
+```bash
+PYLON_CAMEMU=1 python -m acquisition capture --mode tiles --seconds 5     # Linux / macOS
+```
+```bat
+set PYLON_CAMEMU=1 && python -m acquisition capture --mode tiles --seconds 5   :: Windows cmd
+```
+```powershell
+$env:PYLON_CAMEMU=1; python -m acquisition capture --mode tiles --seconds 5    # PowerShell
+```
+
 ## Before the laptop returns to Belgium
 
 ```bash
