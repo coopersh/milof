@@ -83,7 +83,7 @@ class BaslerLineScan:
 
     def _configure(self) -> None:
         c = self.cfg
-        self._set("GevSCPSPacketSize", 9000)  # needs jumbo frames on the NIC
+        self._set("GevSCPSPacketSize", c.packet_size_bytes)  # 9000 needs jumbo frames; 1500 for a NIC without
         self._set("PixelFormat", c.pixel_format)
         self._set("Width", c.width_px)
         self._set("Height", c.lines_per_frame)

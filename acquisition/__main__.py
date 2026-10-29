@@ -2,10 +2,13 @@
 
     python -m acquisition capture [--sim] [--mode birds|tiles] [--seconds N]
     python -m acquisition calibrate [--sim] [--seconds N]
+    python -m acquisition view [--sim] [--seconds N]
 
 `capture` grabs, cuts one image per bird (or fixed tiles) and saves them under
 data/YYYYMMDD/. `calibrate` grabs for a while and reports the bird period actually seen
-in the stream, to check line_rate_hz / birds_per_min before a real run.
+in the stream, to check line_rate_hz / birds_per_min before a real run. `view` opens a
+live preview with exposure / line-rate knobs, for aiming and tuning the rig at the line
+(needs a GUI build of opencv — opencv-python, not -headless).
 """
 from __future__ import annotations
 
@@ -98,7 +101,7 @@ def calibrate(cfg: Config, sim: bool, seconds: float) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m acquisition")
-    ap.add_argument("command", choices=["capture", "calibrate"])
+    ap.add_argument("command", choices=["capture", "calibrate", "view"])
     ap.add_argument("--config", default=str(DEFAULT_CONFIG))
     ap.add_argument("--sim", action="store_true", help="use the simulator instead of the camera")
     ap.add_argument("--mode", choices=["birds", "tiles"], default=None,
@@ -110,6 +113,10 @@ def main() -> None:
     cfg = load_config(args.config)
     if args.command == "calibrate":
         calibrate(cfg, args.sim, args.seconds or 10.0)
+    elif args.command == "view":
+        from pathlib import Path
+        from .viewer import run as run_viewer
+        run_viewer(cfg, Path(args.config), args.sim, args.seconds)
     else:
         mode = args.mode or ("tiles" if cfg.segmentation.method == "tiles" else "birds")
         capture(cfg, args.sim, mode, args.seconds)

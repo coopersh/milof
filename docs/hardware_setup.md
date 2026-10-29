@@ -1,5 +1,8 @@
 # Hardware setup
 
+Rig BOM, wiring, optics and physics. For the on-site tuning procedure (which knob to
+turn in what order, with the viewer), see [calibration.md](calibration.md).
+
 ## Bill of materials (rig as built)
 
 | Qty | Item | Role |

@@ -20,6 +20,7 @@ class CameraConfig:
     exposure_us: float | None
     width_px: int
     pixel_format: str
+    packet_size_bytes: int
 
 
 @dataclass
@@ -71,6 +72,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG) -> Config:
             exposure_us=cam.get("exposure_us"),
             width_px=int(cam.get("width_px", 4096)),
             pixel_format=cam.get("pixel_format", "RGB8"),
+            packet_size_bytes=int(cam.get("packet_size_bytes", 9000)),
         ),
         segmentation=SegmentationConfig(
             method=seg.get("method", "periodic"),

@@ -2,15 +2,16 @@
 camera:
   model: r2L4096-14gc       # Basler racer 2 S, 4k colour line-scan, GigE
   serial: null              # pick a specific camera; null = by ip, else first found
-  ip: 192.168.10.2
+  ip: 169.254.3.100
   lens_mm: 12               # C11-1220-12M, lens front 450 mm from bird; lights 150 mm, 15° tilt
   aperture: 4               # f/4–5.6 for depth of field, see docs/hardware_setup.md
-  line_rate_hz: 3000        # square ~0.13 mm pixels at 0.40 m/s (6" pitch, 156 birds/min); max 14000
+  line_rate_hz: 3000.0        # square ~0.13 mm pixels at 0.40 m/s (6" pitch, 156 birds/min); max 14000
   lines_per_frame: 256      # lines per GigE frame; the stream is reassembled in software
   trigger: free_run         # free_run only — no encoder fitted yet
-  exposure_us: null         # null = keep camera value; must be < 1e6 / line_rate_hz
+  exposure_us: 461.0         # null = keep camera value; must be < 1e6 / line_rate_hz
   width_px: 4096
   pixel_format: RGB8
+  packet_size_bytes: 1500    # 1500 works on any NIC; raise to 9000 on the production NIC after jumbo frames are enabled (see docs/bench_setup.md)
 
 segmentation:
   # Birds overlap on the line, so there is no gap to cut on. Each bird is cut as a fixed
