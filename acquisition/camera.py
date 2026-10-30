@@ -26,12 +26,17 @@ class Block:
 
 
 class BaslerLineScan:
-    """racer 2 S via pypylon. Free-run line trigger only (no encoder fitted yet)."""
+    """racer 2 S via pypylon. Free-run line trigger only (no encoder fitted yet).
+
+    Not thread-safe: call every method from the thread that grabs.
+    """
 
     def __init__(self, cfg: CameraConfig):
         self.cfg = cfg
         self._cam = None
         self._converter = None
+        self._line = 0
+        self._last_id = None
 
     def __enter__(self):
         self.open()
@@ -85,6 +90,7 @@ class BaslerLineScan:
         c = self.cfg
         self._set("GevSCPSPacketSize", c.packet_size_bytes)  # 9000 needs jumbo frames; 1500 for a NIC without
         self._set("PixelFormat", c.pixel_format)
+        self._set("ReverseX", c.reverse_x)
         self._set("Width", c.width_px)
         self._set("Height", c.lines_per_frame)
         for selector in ("LineStart", "FrameStart"):
@@ -95,38 +101,119 @@ class BaslerLineScan:
         if c.exposure_us is not None:
             self._set("ExposureTime", float(c.exposure_us))
 
-    def blocks(self) -> Iterator[Block]:
+    @property
+    def is_open(self) -> bool:
+        return self._cam is not None
+
+    @property
+    def grabbing(self) -> bool:
+        return self._cam is not None and self._cam.IsGrabbing()
+
+    def start(self) -> None:
         from pypylon import pylon
 
-        frame_ms = 1000.0 * self.cfg.lines_per_frame / self.cfg.line_rate_hz
-        timeout_ms = int(max(1000, 5 * frame_ms))
+        self._last_id = None
         self._cam.StartGrabbing(pylon.GrabStrategy_OneByOne)
-        line = 0
-        last_id = None
-        try:
-            while self._cam.IsGrabbing():
-                res = self._cam.RetrieveResult(timeout_ms, pylon.TimeoutHandling_ThrowException)
-                try:
-                    if not res.GrabSucceeded():
-                        log.error("grab failed: %s", res.GetErrorDescription())
-                        continue
-                    block_id = getattr(res, "BlockID", None)
-                    lost = 0
-                    if block_id is not None and last_id is not None and block_id > last_id + 1:
-                        lost = block_id - last_id - 1
-                        line += lost * self.cfg.lines_per_frame  # keep line index = time
-                        log.warning("lost %d frame(s) before block %d", lost, block_id)
-                    last_id = block_id
-                    arr = self._converter.Convert(res).GetArray().copy()
-                    yield Block(line, arr, lost)
-                    line += arr.shape[0]
-                finally:
-                    res.Release()
-        finally:
+
+    def stop(self) -> None:
+        if self.grabbing:
             self._cam.StopGrabbing()
+
+    def timeout_ms(self) -> int:
+        frame_ms = 1000.0 * self.cfg.lines_per_frame / self.cfg.line_rate_hz
+        return int(max(1000, 5 * frame_ms))
+
+    def retrieve(self, timeout_ms: int) -> Block | None:
+        """Next block, or None if that grab failed. Raises TimeoutError if nothing arrived."""
+        from pypylon import pylon
+
+        res = self._cam.RetrieveResult(timeout_ms, pylon.TimeoutHandling_Return)
+        if res is None or not res.IsValid():
+            raise TimeoutError(f"no frame within {timeout_ms} ms")
+        try:
+            if not res.GrabSucceeded():
+                log.error("grab failed: %s", res.GetErrorDescription())
+                return None
+            block_id = getattr(res, "BlockID", None)
+            lost = 0
+            if block_id is not None and self._last_id is not None and block_id > self._last_id + 1:
+                lost = block_id - self._last_id - 1
+                self._line += lost * self.cfg.lines_per_frame  # keep line index = time
+                log.warning("lost %d frame(s) before block %d", lost, block_id)
+            self._last_id = block_id
+            arr = self._converter.Convert(res).GetArray().copy()
+            block = Block(self._line, arr, lost)
+            self._line += arr.shape[0]
+            return block
+        finally:
+            res.Release()
+
+    def blocks(self) -> Iterator[Block]:
+        self.start()
+        try:
+            while True:
+                block = self.retrieve(self.timeout_ms())
+                if block is not None:
+                    yield block
+        finally:
+            self.stop()
+
+    # --- GenICam node access (names differ between Basler families, hence by name) ---
+
+    def get(self, name: str):
+        return getattr(self._cam, name).Value
+
+    def set(self, name: str, value) -> None:
+        getattr(self._cam, name).Value = value
+
+    def limits(self, name: str) -> tuple[float, float] | None:
+        node = getattr(self._cam, name)
+        try:
+            return float(node.Min), float(node.Max)
+        except Exception:  # noqa: BLE001 — not a numeric node
+            return None
+
+    def execute(self, name: str, wait_s: float = 0.0) -> None:
+        """Run a command node; with wait_s, poll IsDone until it finishes."""
+        node = getattr(self._cam, name)
+        node.Execute()
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            try:
+                if node.IsDone():
+                    return
+            except Exception:  # noqa: BLE001 — command without IsDone support
+                return
+            time.sleep(0.1)
+        if wait_s:
+            raise TimeoutError(f"{name} did not finish within {wait_s:.0f} s")
+
+    def node_kinds(self) -> dict[str, str]:
+        """{node name: enum|command|int|float|bool|string|other} for every node."""
+        from pypylon import genicam
+
+        by_interface = {
+            genicam.intfIEnumeration: "enum", genicam.intfICommand: "command",
+            genicam.intfIInteger: "int", genicam.intfIFloat: "float",
+            genicam.intfIBoolean: "bool", genicam.intfIString: "string",
+        }
+        kinds = {}
+        for node in self._cam.GetNodeMap().GetNodes():
+            try:
+                kinds[node.GetName()] = by_interface.get(node.GetPrincipalInterfaceType(), "other")
+            except Exception:  # noqa: BLE001 — skip nodes the wrapper can't describe
+                continue
+        return kinds
+
+    def enum_options(self, name: str) -> list[str]:
+        from pypylon import genicam
+
+        node = self._cam.GetNodeMap().GetNode(name)
+        return [e.GetSymbolic() for e in node.GetEntries() if genicam.IsAvailable(e)]
 
     def close(self) -> None:
         if self._cam is not None:
+            self.stop()
             self._cam.Close()
             self._cam = None
 
@@ -167,7 +254,8 @@ class SimulatedLineScan:
     def bird_center(self, k: int) -> float:
         return self.phase + (k + 0.5) * self.true_period
 
-    def _render(self, start: int, n: int) -> np.ndarray:
+    def render(self, start: int, n: int) -> np.ndarray:
+        """Lines [start, start + n) of the stream."""
         t = np.arange(start, start + n, dtype=float)
         k0 = np.floor((t - self.phase) / self.true_period).astype(int)
         half_h = np.zeros(n)
@@ -189,7 +277,7 @@ class SimulatedLineScan:
             n = self.lines_per_frame
             if total_lines is not None:
                 n = min(n, total_lines - line)
-            yield Block(line, self._render(line, n))
+            yield Block(line, self.render(line, n))
             line += n
             if self.line_rate_hz:
                 time.sleep(n / self.line_rate_hz)

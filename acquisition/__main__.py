@@ -20,7 +20,7 @@ import numpy as np
 
 from .camera import BaslerLineScan, SimulatedLineScan
 from .config import DEFAULT_CONFIG, Config, load_config
-from .segmenter import PeriodicSegmenter, TileSegmenter, estimate_period, line_profile
+from .segmenter import estimate_period, line_profile, make_segmenter
 from .writer import AsyncWriter
 
 log = logging.getLogger("acquisition")
@@ -34,16 +34,8 @@ def make_source(cfg: Config, sim: bool):
     return BaslerLineScan(cfg.camera)
 
 
-def make_segmenter(cfg: Config, mode: str):
-    s = cfg.segmentation
-    if mode == "tiles":
-        return TileSegmenter(s.tile_lines)
-    return PeriodicSegmenter(s.nominal_period(cfg.camera.line_rate_hz), s.window_factor,
-                             s.track_gain, s.min_contrast, s.profile_sign)
-
-
 def capture(cfg: Config, sim: bool, mode: str, seconds: float | None) -> None:
-    seg = make_segmenter(cfg, mode)
+    seg = make_segmenter(cfg.segmentation, cfg.camera.line_rate_hz, mode)
     writer = AsyncWriter(cfg.storage).start()
     cut = lost = 0
     t0 = last_report = time.monotonic()

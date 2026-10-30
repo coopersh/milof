@@ -59,8 +59,9 @@ Basler line-scan ──> acquisition/  (grab lines, cut stream into one image pe
                      labeling/     (export to labelling tool, import labels)
                      models/       (train / evaluate per-defect detectors)
                      review/       (run models on saved data, retrospective report)
+                     ui/           (station web UI: live view, settings, capture, calibration wizard)
 config/  camera + defect category definitions
-docs/    defect definitions, line requirements
+docs/    defect definitions, line requirements, calibration procedure
 ```
 
 ## Design rules
@@ -87,6 +88,21 @@ start line, profile contrast, tracking error, current period).
 Threads: capture loop (grab → segment) on the main thread; `AsyncWriter` thread does
 rotation, JPEG encoding and disk I/O. `submit()` never blocks — a full queue drops and
 counts the image.
+
+## Station UI
+
+```bash
+python -m ui --sim             # simulator, http://127.0.0.1:8000
+python -m ui                   # real camera (pip install -e ".[camera,ui]")
+```
+
+One "camera" thread in `ui/service.py` owns the camera (grab, preview ring, segmenter,
+writer); HTTP handlers reach it only through `CameraService.call()`, and build previews and
+stats from copies — so a slow request never stalls the grab loop. The calibration wizard
+(`ui/calibration.py`) finds shading-correction / user-set nodes by name pattern and shows
+them before executing; procedure in `docs/calibration.md`. Settings save back to
+`config/camera.yaml` with comments kept (`acquisition.config.save_values`), backup under
+`data/config_backups/`. No auth: bind to 127.0.0.1 unless on the isolated camera network.
 
 ## Testing
 

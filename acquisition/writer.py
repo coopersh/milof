@@ -11,6 +11,7 @@ import queue
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -25,11 +26,24 @@ LOG_FIELDS = ["timestamp", "seq", "kind", "start_line", "n_lines", "contrast",
               "error_lines", "period", "file"]
 
 
+def orient(lines: np.ndarray, cfg: StorageConfig) -> np.ndarray:
+    """Stream layout (time, sensor) → saved-image layout per the storage config."""
+    img = lines.transpose(1, 0, 2) if cfg.rotate else lines
+    if cfg.flip_vertical:
+        img = img[::-1]
+    if cfg.flip_horizontal:
+        img = img[:, ::-1]
+    return np.ascontiguousarray(img)
+
+
 class AsyncWriter:
-    def __init__(self, cfg: StorageConfig):
+    def __init__(self, cfg: StorageConfig,
+                 on_written: Callable[[BirdWindow, Path, np.ndarray], None] | None = None):
+        """`on_written(window, path, oriented_image)` runs on the writer thread after each save."""
         self.cfg = cfg
         self._q: queue.Queue[BirdWindow | None] = queue.Queue(maxsize=cfg.queue_size)
         self._thread = threading.Thread(target=self._run, name="writer", daemon=True)
+        self._on_written = on_written
         self.written = 0
         self.dropped = 0
         self.failed = 0
@@ -52,23 +66,24 @@ class AsyncWriter:
         self._thread.join()
 
     def orient(self, lines: np.ndarray) -> np.ndarray:
-        img = lines.transpose(1, 0, 2) if self.cfg.rotate else lines
-        if self.cfg.flip_vertical:
-            img = img[::-1]
-        if self.cfg.flip_horizontal:
-            img = img[:, ::-1]
-        return np.ascontiguousarray(img)
+        return orient(lines, self.cfg)
 
     def _run(self) -> None:
         while (win := self._q.get()) is not None:
             try:
-                self._write(win)
+                path, img = self._write(win)
                 self.written += 1
             except Exception:  # noqa: BLE001 — never kill the writer thread
                 self.failed += 1
                 log.exception("failed to write %s %d", win.kind, win.seq)
+                continue
+            if self._on_written is not None:
+                try:
+                    self._on_written(win, path, img)
+                except Exception:  # noqa: BLE001 — a listener bug must not stop saving
+                    log.exception("on_written callback failed for %s %d", win.kind, win.seq)
 
-    def _write(self, win: BirdWindow) -> None:
+    def _write(self, win: BirdWindow) -> tuple[Path, np.ndarray]:
         ts = datetime.fromtimestamp(win.timestamp)
         day_dir = self.cfg.data_dir / ts.strftime("%Y%m%d")
         img_dir = day_dir / "images"
@@ -77,7 +92,8 @@ class AsyncWriter:
         params = []
         if self.cfg.image_format.lower() in ("jpg", "jpeg"):
             params = [cv2.IMWRITE_JPEG_QUALITY, self.cfg.jpeg_quality]
-        if not cv2.imwrite(str(img_dir / name), self.orient(win.lines), params):
+        img = self.orient(win.lines)
+        if not cv2.imwrite(str(img_dir / name), img, params):
             raise OSError(f"cv2.imwrite failed for {name}")
         self._log(day_dir / LOG_NAME, {
             "timestamp": ts.isoformat(timespec="milliseconds"),
@@ -90,6 +106,7 @@ class AsyncWriter:
             "period": f"{win.period:.1f}",
             "file": f"images/{name}",
         })
+        return img_dir / name, img
 
     @staticmethod
     def _log(path: Path, row: dict) -> None:

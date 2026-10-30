@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .camera import Block
+from .config import SegmentationConfig
 
 
 @dataclass
@@ -174,6 +175,14 @@ class TileSegmenter:
             self._seq += 1
             self._buf.drop_before(self._seq * self.tile)
         return out
+
+
+def make_segmenter(s: SegmentationConfig, line_rate_hz: float, mode: str):
+    """`mode` is "birds" (periodic, one image per bird) or "tiles" (fixed chunks)."""
+    if mode == "tiles":
+        return TileSegmenter(s.tile_lines)
+    return PeriodicSegmenter(s.nominal_period(line_rate_hz), s.window_factor,
+                             s.track_gain, s.min_contrast, s.profile_sign)
 
 
 def estimate_period(profile: np.ndarray, min_period: float, max_period: float) -> float:

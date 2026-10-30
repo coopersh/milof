@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Milof · עמדת צילום</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Milof <span class="muted">· עמדת צילום</span></div>
+  <div class="pills">
+    <span id="pill-source" class="pill">…</span>
+    <span id="pill-stream" class="pill">…</span>
+    <span id="pill-capture" class="pill hidden">מצלם</span>
+    <span id="pill-dirty" class="pill warn hidden" title="יש שינויים בהגדרות שלא נשמרו לקובץ">לא נשמר</span>
+  </div>
+  <div class="top-metrics">
+    <span>קצב שורות נמדד <b id="m-rate" dir="ltr">—</b></span>
+    <span>פריימים שאבדו <b id="m-lost" dir="ltr">0</b></span>
+  </div>
+</header>
+
+<div id="error-bar" class="error-bar hidden">
+  <span id="error-text"></span>
+  <button id="btn-reconnect" class="btn small">חיבור מחדש</button>
+</div>
+
+<main class="layout">
+  <section class="panel">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="capture">צילום</button>
+      <button class="tab" data-tab="camera">מצלמה</button>
+      <button class="tab" data-tab="segmentation">חיתוך</button>
+      <button class="tab" data-tab="storage">שמירה</button>
+      <button class="tab" data-tab="calibration">כיול</button>
+    </nav>
+
+    <!-- capture -->
+    <div class="tab-body" id="tab-capture">
+      <div class="row">
+        <label class="field grow">מצב
+          <select id="capture-mode">
+            <option value="birds">תמונה לכל עוף</option>
+            <option value="tiles">חלקים קבועים (בדיקות)</option>
+          </select>
+        </label>
+        <button id="btn-capture" class="btn primary big">התחל צילום</button>
+      </div>
+      <div class="counters">
+        <div><span>זמן</span><b id="c-time" dir="ltr">—</b></div>
+        <div><span>נחתכו</span><b id="c-cut" dir="ltr">—</b></div>
+        <div><span>נשמרו</span><b id="c-written" dir="ltr">—</b></div>
+        <div><span>נזרקו</span><b id="c-dropped" dir="ltr">—</b></div>
+        <div><span>כשלי כתיבה</span><b id="c-failed" dir="ltr">—</b></div>
+        <div><span>מקום פנוי</span><b id="c-disk" dir="ltr">—</b></div>
+      </div>
+      <p class="hint">תיקייה: <bdi id="c-dir">—</bdi></p>
+      <div id="last-capture" class="note hidden"></div>
+      <h3>תמונות אחרונות</h3>
+      <div id="recent" class="recent"><p class="hint">עוד לא נשמרו תמונות בהרצה הזאת.</p></div>
+    </div>
+
+    <!-- camera -->
+    <div class="tab-body hidden" id="tab-camera">
+      <div class="info-grid" id="camera-info"></div>
+      <label class="field">זמן חשיפה (µs)
+        <div class="slider-row">
+          <input type="range" id="exp-range" min="10" max="2000" step="1">
+          <input type="number" id="cam-exposure_us" step="1">
+        </div>
+        <small class="hint">מקסימום בקצב הנוכחי: <b id="exp-max" dir="ltr">—</b> µs. מעל זה המצלמה חותכת.</small>
+      </label>
+      <label class="field">קצב שורות (Hz)
+        <input type="number" id="cam-line_rate_hz" step="1">
+      </label>
+      <label class="field">שורות לפריים GigE
+        <input type="number" id="cam-lines_per_frame" step="1">
+      </label>
+      <label class="field">גודל חבילה (bytes)
+        <input type="number" id="cam-packet_size_bytes" step="1">
+        <small class="hint">1500 בכרטיס רשת בלי jumbo frames; 8192 עם jumbo.</small>
+      </label>
+      <label class="check"><input type="checkbox" id="cam-reverse_x"> ReverseX (היפוך הסנסור)</label>
+      <div class="actions">
+        <button class="btn" id="btn-apply-camera">החל</button>
+        <button class="btn primary" data-save>שמור לקובץ</button>
+      </div>
+    </div>
+
+    <!-- segmentation -->
+    <div class="tab-body hidden" id="tab-segmentation">
+      <label class="check"><input type="checkbox" id="show-cuts"> הצג מרכזי חיתוך על התצוגה החיה</label>
+      <div class="info-grid" id="seg-derived"></div>
+      <label class="field">שיטה
+        <select id="seg-method"><option value="periodic">מחזורית (עוף לכל תמונה)</option><option value="tiles">חלקים קבועים</option></select>
+      </label>
+      <label class="field">עופות לדקה <input type="number" id="seg-birds_per_min" step="0.1"></label>
+      <label class="field">מחזור בשורות (ריק = מחושב) <input type="number" id="seg-period_lines" step="0.1"></label>
+      <label class="field">רוחב חלון (במחזורים) <input type="number" id="seg-window_factor" step="0.05"></label>
+      <label class="field">הגבר מעקב (0 = בלי מעקב) <input type="number" id="seg-track_gain" step="0.05"></label>
+      <label class="field">ניגודיות מינימלית למעקב <input type="number" id="seg-min_contrast" step="0.5"></label>
+      <label class="field">כיוון פרופיל
+        <select id="seg-profile_sign"><option value="1">עוף בהיר מהרקע</option><option value="-1">עוף כהה מהרקע</option></select>
+      </label>
+      <label class="field">שורות לחלק (מצב חלקים) <input type="number" id="seg-tile_lines" step="1"></label>
+      <div class="note" id="seg-live">—</div>
+      <div class="actions">
+        <button class="btn" id="btn-apply-seg">החל</button>
+        <button class="btn primary" data-save>שמור לקובץ</button>
+      </div>
+    </div>
+
+    <!-- storage -->
+    <div class="tab-body hidden" id="tab-storage">
+      <p class="hint">תיקיית נתונים: <bdi id="st-dir">—</bdi></p>
+      <label class="field">איכות JPEG <input type="number" id="st-jpeg_quality" min="1" max="100"></label>
+      <label class="check"><input type="checkbox" id="st-rotate"> סובב כך שהעוף זקוף</label>
+      <label class="check"><input type="checkbox" id="st-flip_vertical"> היפוך אנכי</label>
+      <label class="check"><input type="checkbox" id="st-flip_horizontal"> היפוך אופקי</label>
+      <div class="actions">
+        <button class="btn" id="btn-apply-storage">החל</button>
+        <button class="btn primary" data-save>שמור לקובץ</button>
+      </div>
+    </div>
+
+    <!-- calibration -->
+    <div class="tab-body hidden" id="tab-calibration">
+      <div id="wizard"></div>
+      <h3>יומן כיול</h3>
+      <div id="calib-log" class="log"></div>
+    </div>
+  </section>
+
+  <section class="live">
+    <div class="live-head">
+      <h2>תצוגה חיה</h2>
+      <span class="hint">כ-1.4 שניות אחרונות · הזמן זורם משמאל לימין, החדש בימין</span>
+    </div>
+    <div class="preview-wrap">
+      <img id="preview" alt="תצוגה חיה">
+      <div id="preview-empty" class="preview-empty">ממתין לתמונה…</div>
+    </div>
+    <div class="stats">
+      <div><span>ממוצע</span><b id="s-mean" dir="ltr">—</b></div>
+      <div><span>מינ׳/מקס׳</span><b id="s-minmax" dir="ltr">—</b></div>
+      <div><span>רוויה (255)</span><b id="s-cliphi" dir="ltr">—</b></div>
+      <div><span>שחור (0)</span><b id="s-cliplo" dir="ltr">—</b></div>
+      <div><span>R / G / B</span><b id="s-rgb" dir="ltr">—</b></div>
+      <div><span>חדות</span><b id="s-sharp" dir="ltr">—</b></div>
+    </div>
+    <div class="charts">
+      <figure>
+        <figcaption>היסטוגרמה <span class="hint">· אזור ירוק = יעד לייצור</span></figcaption>
+        <canvas id="hist" width="560" height="140"></canvas>
+      </figure>
+      <figure>
+        <figcaption>פרופיל לאורך הסנסור <span class="hint">· אחידות: <b id="s-flat" dir="ltr">—</b></span></figcaption>
+        <canvas id="profile" width="560" height="140"></canvas>
+      </figure>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<dialog id="confirm">
+  <form method="dialog">
+    <h3 id="confirm-title"></h3>
+    <div id="confirm-body"></div>
+    <div class="actions">
+      <button value="cancel" class="btn">ביטול</button>
+      <button value="ok" class="btn danger" id="confirm-ok">אישור</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/charts.js"></script>
+<script src="/static/wizard.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

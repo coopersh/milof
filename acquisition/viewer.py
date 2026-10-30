@@ -8,14 +8,13 @@ Keys:
     q / Esc   quit
     s         snapshot the current rolling strip to data/calibration/
     w         write the current exposure / line rate back to config/camera.yaml
-              (regex substitution: leaves comments and other keys untouched)
+              (comments and other keys are kept)
 
 Needs a GUI build of OpenCV (`opencv-python`, not `-headless`); the error message says so.
 """
 from __future__ import annotations
 
 import logging
-import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from .camera import SimulatedLineScan
-from .config import Config
+from .config import Config, save_values
 
 log = logging.getLogger(__name__)
 
@@ -69,16 +68,6 @@ def _overlay(disp: np.ndarray, text: str, hist: np.ndarray) -> np.ndarray:
     disp[y0:y0 + hy, x0:x0 + hx] = cv2.addWeighted(
         disp[y0:y0 + hy, x0:x0 + hx], 0.3, hist, 0.7, 0)
     return disp
-
-
-def _write_knobs_to_config(path: Path, line_rate_hz: float, exposure_us: float) -> None:
-    """Regex-replace just the two scalar values; leaves comments and other keys as-is."""
-    text = path.read_text(encoding="utf-8")
-    text = re.sub(r"^(\s*line_rate_hz:\s*)\S+",
-                  lambda m: f"{m.group(1)}{line_rate_hz:.1f}", text, flags=re.M)
-    text = re.sub(r"^(\s*exposure_us:\s*)\S+",
-                  lambda m: f"{m.group(1)}{exposure_us:.1f}", text, flags=re.M)
-    path.write_text(text, encoding="utf-8")
 
 
 def _import_cv2_gui():
@@ -214,9 +203,9 @@ def _run_camera(cfg: Config, config_path: Path, cv2, seconds: float | None) -> N
                             [cv2.IMWRITE_JPEG_QUALITY, cfg.storage.jpeg_quality])
                 log.info("snapshot saved: %s", p)
             if k == ord('w'):
-                _write_knobs_to_config(config_path,
-                                       float(cam.AcquisitionLineRate.Value),
-                                       float(cam.ExposureTime.Value))
+                save_values(config_path, {"camera": {
+                    "line_rate_hz": float(cam.AcquisitionLineRate.Value),
+                    "exposure_us": float(cam.ExposureTime.Value)}})
                 log.info("wrote exposure_us=%.0f line_rate_hz=%.0f to %s",
                          cam.ExposureTime.Value, cam.AcquisitionLineRate.Value, config_path)
             if seconds is not None and now - t0 >= seconds:

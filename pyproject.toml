@@ -12,7 +12,11 @@ dependencies = [
 [project.optional-dependencies]
 camera = ["pypylon"]
 viewer = ["opencv-python"]  # GUI build; replaces opencv-python-headless
-dev = ["pytest"]
+ui = ["fastapi", "uvicorn"]
+dev = ["pytest", "httpx"]
 
 [tool.setuptools]
-packages = ["acquisition", "labeling", "models", "review"]
+packages = ["acquisition", "labeling", "models", "review", "ui"]
+
+[tool.setuptools.package-data]
+ui = ["static/*"]
