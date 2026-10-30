@@ -143,8 +143,11 @@ const Wizard = (() => {
         "Find the <b>lower ring</b> on the lens — the one with f-numbers (2.8, 4, 5.6, 8…).",
         "Set it to <b>5.6</b> and tighten its lock screw.",
       ],
-      see: "Nothing changes in the checks. A higher f-number only makes the picture darker.",
+      see: "The live view gets darker as the number goes up, and the brightness below drops — that is expected; step 4 brings it back with exposure. The wizard cannot read the ring, so tick the box when it is set.",
       why: "f/5.6–f/8 keeps the whole bird in focus while letting in enough light. Never touch this ring after PRNU (step 5) — changing it voids the calibration.",
+      live: (s) => !s ? "" : `<div class="gauge">Brightness (mean) <b>${fmt(s.mean, 0)}</b>
+        <span>R/G/B ${fmt(s.rgb_mean[0], 0)} / ${fmt(s.rgb_mean[1], 0)} / ${fmt(s.rgb_mean[2], 0)}</span></div>
+        <div class="hint">Turn the ring and watch this number: lower f-number → brighter.</div>`,
       check: "manual",
     },
     {
