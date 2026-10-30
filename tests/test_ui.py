@@ -96,6 +96,17 @@ def test_warns_when_exposure_caps_line_rate(service):
     assert "µs" in service.status()["warning"]
 
 
+def test_data_dir_change_is_validated_and_saved(service, tmp_path):
+    new_dir = tmp_path / "elsewhere" / "data"
+    service.set_storage({"data_dir": str(new_dir)})
+    assert new_dir.is_dir()
+    assert service.calib_dir.parent == new_dir
+    service.save_config()
+    assert load_config(service.config_path).storage.data_dir == new_dir
+    with pytest.raises(UserError):
+        service.set_storage({"data_dir": "  "})
+
+
 def test_save_config_keeps_comments_and_backs_up(service):
     service.set_camera({"exposure_us": 300})
     result = service.save_config()

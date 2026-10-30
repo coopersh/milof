@@ -113,7 +113,11 @@
 
     <!-- storage -->
     <div class="tab-body hidden" id="tab-storage">
-      <p class="hint">Data folder: <bdi id="st-dir">—</bdi></p>
+      <label class="field">Data folder
+        <input type="text" id="st-data_dir" spellcheck="false">
+        <small class="hint">Images, logs and calibration go here, in daily subfolders. A relative path is
+          resolved from the folder the UI was started in. Full path: <bdi id="st-dir">—</bdi></small>
+      </label>
       <label class="field">JPEG quality <input type="number" id="st-jpeg_quality" min="1" max="100"></label>
       <label class="check"><input type="checkbox" id="st-rotate"> Rotate so the bird is upright</label>
       <label class="check"><input type="checkbox" id="st-flip_vertical"> Flip vertically</label>

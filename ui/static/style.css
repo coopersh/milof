@@ -44,16 +44,16 @@ h3 { font-size: 15px; margin: 18px 0 8px; color: var(--muted); font-weight: 600;
   background: #3a1616; border-bottom: 1px solid var(--bad); color: #ffd6d6;
 }
 
-.layout { display: grid; grid-template-columns: 440px 1fr; gap: 16px; padding: 16px; align-items: start; }
+.layout { display: grid; grid-template-columns: 470px 1fr; gap: 16px; padding: 16px; align-items: start; }
 @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
 
 .panel, .live {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px;
 }
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: -4px -4px 14px; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); margin: -4px -4px 14px; }
 .tab {
-  background: none; border: none; color: var(--muted); padding: 8px 12px; cursor: pointer;
-  font: inherit; border-bottom: 2px solid transparent;
+  flex: 1 1 auto; background: none; border: none; color: var(--muted); padding: 8px 6px; cursor: pointer;
+  font: inherit; font-size: 14px; white-space: nowrap; border-bottom: 2px solid transparent;
 }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 

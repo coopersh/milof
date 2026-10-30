@@ -107,6 +107,23 @@ def _coerce(name: str, value: Any, typ: type) -> Any:
     return v
 
 
+def _writable_dir(value: Any) -> Path:
+    """The folder for captured data: created if missing, and checked writable now rather
+    than at the first bird of a capture run."""
+    text = str(value or "").strip().strip('"')
+    if not text:
+        raise UserError("data folder cannot be empty")
+    path = Path(text).expanduser()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write_test"
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as e:
+        raise UserError(f"cannot write to {path}: {e.strerror or e}") from None
+    return path
+
+
 def _existing_ancestor(path: Path) -> Path:
     path = path.resolve()
     while not path.exists() and path != path.parent:
@@ -121,9 +138,7 @@ class CameraService:
         self.sim = sim
         nominal = cfg.segmentation.nominal_period(cfg.camera.line_rate_hz)
         self.cam = SimCamera(cfg.camera, nominal, realtime) if sim else BaslerLineScan(cfg.camera)
-        # the simulator keeps its own log: its focus reference must never be the real one's
-        self.calib_dir = cfg.storage.data_dir / ("calibration_sim" if sim else "calibration")
-        self.calib_log = calibration.CalibrationLog(self.calib_dir / "calibration_log.jsonl")
+        self._set_calib_dir()
         self.nodes: calibration.Nodes | None = None
         self.device = ""
         self.error: str | None = None
@@ -474,7 +489,8 @@ class CameraService:
                             "width_px": c.width_px, "pixel_format": c.pixel_format},
             "segmentation": {f.name: getattr(s, f.name) for f in fields(SegmentationConfig)},
             "storage": {**{k: getattr(self.cfg.storage, k) for k in STORAGE_TYPES},
-                        "data_dir": str(self.cfg.storage.data_dir)},
+                        "data_dir": str(self.cfg.storage.data_dir),
+                        "data_dir_abs": str(self.cfg.storage.data_dir.resolve())},
             "derived": {
                 "exposure_max_us": round(1e6 / line_rate, 1),
                 "nominal_period_lines": round(period, 1),
@@ -545,11 +561,24 @@ class CameraService:
     def set_storage(self, values: dict) -> dict:
         if self._capture is not None:
             raise UserError("stop capture before changing storage settings")
+        parsed = {}
         for name, value in values.items():
-            if name not in STORAGE_TYPES:
+            if name == "data_dir":
+                parsed[name] = _writable_dir(value)
+            elif name in STORAGE_TYPES:
+                parsed[name] = _coerce(name, value, STORAGE_TYPES[name])
+            else:
                 raise UserError(f"unknown storage field: {name}")
-            setattr(self.cfg.storage, name, _coerce(name, value, STORAGE_TYPES[name]))
+        for name, value in parsed.items():
+            setattr(self.cfg.storage, name, value)
+        if "data_dir" in parsed:
+            self._set_calib_dir()
         return self.settings()
+
+    def _set_calib_dir(self) -> None:
+        # the simulator keeps its own log: its focus reference must never be the real one's
+        self.calib_dir = self.cfg.storage.data_dir / ("calibration_sim" if self.sim else "calibration")
+        self.calib_log = calibration.CalibrationLog(self.calib_dir / "calibration_log.jsonl")
 
     def save_config(self) -> dict:
         backup_dir = self.cfg.storage.data_dir / "config_backups"
@@ -560,7 +589,8 @@ class CameraService:
         save_values(self.config_path, {
             "camera": {name: getattr(c, name) for name in CAMERA_FIELDS},
             "segmentation": {f.name: getattr(s, f.name) for f in fields(SegmentationConfig)},
-            "storage": {name: getattr(st, name) for name in STORAGE_TYPES},
+            "storage": {**{name: getattr(st, name) for name in STORAGE_TYPES},
+                        "data_dir": st.data_dir.as_posix()},
         })
         return {"path": str(self.config_path), "backup": str(backup)}
 

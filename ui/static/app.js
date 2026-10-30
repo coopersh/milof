@@ -187,7 +187,7 @@ async function pollRecent() {
 const CAM_FIELDS = ["exposure_us", "line_rate_hz", "lines_per_frame", "packet_size_bytes", "reverse_x"];
 const SEG_FIELDS = ["method", "birds_per_min", "period_lines", "window_factor", "track_gain",
   "min_contrast", "profile_sign", "tile_lines"];
-const ST_FIELDS = ["jpeg_quality", "rotate", "flip_vertical", "flip_horizontal"];
+const ST_FIELDS = ["data_dir", "jpeg_quality", "rotate", "flip_vertical", "flip_horizontal"];
 
 function fillField(id, value) {
   const el = $(id);
@@ -226,7 +226,7 @@ function renderSettings(s) {
   ].map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("");
 
   ST_FIELDS.forEach((f) => fillField(`#st-${f}`, s.storage[f]));
-  $("#st-dir").textContent = s.storage.data_dir;
+  $("#st-dir").textContent = s.storage.data_dir_abs;
   Wizard.update({ settings: s });
 }
 
