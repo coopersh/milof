@@ -82,6 +82,14 @@ def test_api_rejects_out_of_range_values(service):
     assert client.get("/api/status").json()["source"] == "sim"
 
 
+def test_warns_when_exposure_caps_line_rate(service):
+    rate = service.cfg.camera.line_rate_hz
+    service.set_camera({"exposure_us": 0.9e6 / rate})
+    assert service.status()["warning"] is None
+    service.set_camera({"exposure_us": 1.3e6 / rate})
+    assert "µs" in service.status()["warning"]
+
+
 def test_save_config_keeps_comments_and_backs_up(service):
     service.set_camera({"exposure_us": 300})
     result = service.save_config()

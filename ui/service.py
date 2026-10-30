@@ -394,6 +394,19 @@ class CameraService:
         span = arr[-1][0] - arr[0][0]
         return round(sum(n for _, n in arr[1:]) / span, 1) if span > 0 else None
 
+    def _rate_warning(self) -> str | None:
+        """The camera silently slows the line rate to fit the exposure; say so."""
+        c = self.cfg.camera
+        if c.exposure_us is None:
+            return None
+        max_rate = 1e6 / c.exposure_us
+        if max_rate >= c.line_rate_hz:
+            return None
+        return (f"החשיפה {c.exposure_us:.0f}µs מגבילה את המצלמה ל-{max_rate:.0f} שורות/ש' "
+                f"במקום {c.line_rate_hz:.0f} — התמונה מכווצת בכיוון התנועה. "
+                f"הורידי חשיפה ל-{1e6 / c.line_rate_hz:.0f}µs לכל היותר (והוסיפי אור/צמצם), "
+                f"או הורידי את קצב השורות.")
+
     def status(self) -> dict:
         cap = self._capture
         disk = shutil.disk_usage(_existing_ancestor(self.cfg.storage.data_dir))
@@ -403,6 +416,7 @@ class CameraService:
             "connected": self.connected,
             "grabbing": self.grabbing,
             "error": self.error,
+            "warning": self._rate_warning(),
             "blocks": self.blocks,
             "lost_frames": self.lost_frames,
             "timeouts": self.timeouts,

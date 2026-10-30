@@ -198,18 +198,17 @@ class BaslerLineScan:
             genicam.intfIBoolean: "bool", genicam.intfIString: "string",
         }
         kinds = {}
-        for node in self._cam.GetNodeMap().GetNodes():
+        for param in self._cam.GetNodeMap().GetNodes():
             try:
+                # newer pypylon returns typed parameter wrappers; the INode sits behind GetNode()
+                node = param.GetNode() if hasattr(param, "GetNode") else param
                 kinds[node.GetName()] = by_interface.get(node.GetPrincipalInterfaceType(), "other")
             except Exception:  # noqa: BLE001 — skip nodes the wrapper can't describe
                 continue
         return kinds
 
     def enum_options(self, name: str) -> list[str]:
-        from pypylon import genicam
-
-        node = self._cam.GetNodeMap().GetNode(name)
-        return [e.GetSymbolic() for e in node.GetEntries() if genicam.IsAvailable(e)]
+        return list(getattr(self._cam, name).GetSymbolics())  # available entries only
 
     def close(self) -> None:
         if self._cam is not None:

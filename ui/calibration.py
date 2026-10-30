@@ -24,6 +24,8 @@ class Nodes:
     shading_selector: str | None = None
     shading_mode: str | None = None
     shading_create: str | None = None
+    shading_create_status: str | None = None  # Active while the correction is being built
+    shading_create_result: str | None = None  # NoError / ErrorRange / ... once done
     user_set_selector: str | None = None
     user_set_save: str | None = None
     user_set_default: str | None = None
@@ -61,6 +63,8 @@ def discover(cam) -> Nodes:
         shading_selector=find("enum", "ShadingCorrection", "Selector"),
         shading_mode=find("enum", "ShadingCorrection", "Mode"),
         shading_create=create,
+        shading_create_status=find("enum", "ShadingCorrection", "CreateStatus"),
+        shading_create_result=find("enum", "ShadingCorrection", "CreateResult"),
         user_set_selector=find("enum", "UserSetSelector"),
         user_set_save=find("command", "UserSetSave"),
         user_set_default=find("enum", "UserSetDefault"),
@@ -97,7 +101,30 @@ def run_prnu(cam, nodes: Nodes) -> list[str]:
     steps.append(f"{nodes.shading_mode}=User")
     cam.execute(nodes.shading_create, wait_s=60.0)
     steps.append(f"{nodes.shading_create}()")
+    _wait_for_create(cam, nodes, timeout_s=60.0)
+    if nodes.shading_create_result is not None:
+        result = str(cam.get(nodes.shading_create_result))
+        steps.append(f"{nodes.shading_create_result}={result}")
+        if result.lower() != "noerror":
+            raise RuntimeError(f"shading correction failed: {nodes.shading_create_result}={result}")
     return steps
+
+
+def _wait_for_create(cam, nodes: Nodes, timeout_s: float) -> None:
+    """IsDone on the command can return before the camera finishes; poll the status node."""
+    if nodes.shading_create_status is None:
+        return
+    deadline = time.monotonic() + timeout_s
+    while True:
+        status = str(cam.get(nodes.shading_create_status))
+        if status.lower() != "active":
+            if status.lower().startswith("error"):  # e.g. ErrorReverseX
+                raise RuntimeError(
+                    f"shading correction failed: {nodes.shading_create_status}={status}")
+            return
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"{nodes.shading_create_status} still Active after {timeout_s:.0f} s")
+        time.sleep(0.2)
 
 
 def save_user_set(cam, nodes: Nodes, user_set: str = "UserSet1") -> list[str]:
