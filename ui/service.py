@@ -97,13 +97,13 @@ def _coerce(name: str, value: Any, typ: type) -> Any:
         else:
             v = typ(value)
     except (TypeError, ValueError):
-        raise UserError(f"ערך לא תקין עבור {name}: {value!r}") from None
+        raise UserError(f"invalid value for {name}: {value!r}") from None
     if name in RANGES:
         lo, hi = RANGES[name]
         if not lo <= v <= hi:
-            raise UserError(f"{name} חייב להיות בין {lo} ל-{hi} (קיבלתי {v})")
+            raise UserError(f"{name} must be between {lo} and {hi} (got {v})")
     if name in CHOICES and v not in CHOICES[name]:
-        raise UserError(f"{name} חייב להיות אחד מ: {', '.join(map(str, CHOICES[name]))}")
+        raise UserError(f"{name} must be one of: {', '.join(map(str, CHOICES[name]))}")
     return v
 
 
@@ -188,7 +188,7 @@ class CameraService:
                 self.timeouts += 1
                 continue
             except Exception as e:  # noqa: BLE001 — keep the loop alive; operator can reconnect
-                self.error = f"שגיאת צילום: {e}"
+                self.error = f"grab error: {e}"
                 log.exception("grab failed")
                 time.sleep(0.5)
                 continue
@@ -218,13 +218,13 @@ class CameraService:
             self.cam.start()
         except Exception as e:  # noqa: BLE001
             self.connected = False
-            self.error = f"אין חיבור למצלמה: {e}"
+            self.error = f"no camera connection: {e}"
             log.warning("camera not available: %s", e)
             return
         self.connected = True
         self.error = None
         if self.sim:
-            self.device = "סימולטור"
+            self.device = "simulator"
         else:
             parts = []
             for node in ("DeviceModelName", "DeviceSerialNumber"):
@@ -242,7 +242,7 @@ class CameraService:
     def reconnect(self) -> None:
         def op():
             if self._capture is not None:
-                raise UserError("עצרי את הצילום לפני חיבור מחדש")
+                raise UserError("stop capture before reconnecting")
             try:
                 self.cam.close()
             except Exception:  # noqa: BLE001
@@ -402,10 +402,10 @@ class CameraService:
         max_rate = 1e6 / c.exposure_us
         if max_rate >= c.line_rate_hz:
             return None
-        return (f"החשיפה {c.exposure_us:.0f}µs מגבילה את המצלמה ל-{max_rate:.0f} שורות/ש' "
-                f"במקום {c.line_rate_hz:.0f} — התמונה מכווצת בכיוון התנועה. "
-                f"הורידי חשיפה ל-{1e6 / c.line_rate_hz:.0f}µs לכל היותר (והוסיפי אור/צמצם), "
-                f"או הורידי את קצב השורות.")
+        return (f"Exposure {c.exposure_us:.0f} µs limits the camera to {max_rate:.0f} lines/s "
+                f"instead of {c.line_rate_hz:.0f}, so images are squashed along the motion. "
+                f"Lower exposure to at most {1e6 / c.line_rate_hz:.0f} µs (add light / open the "
+                f"aperture), or lower the line rate.")
 
     def status(self) -> dict:
         cap = self._capture
@@ -487,12 +487,12 @@ class CameraService:
         parsed = {}
         for name, value in values.items():
             if name not in CAMERA_FIELDS:
-                raise UserError(f"שדה מצלמה לא מוכר: {name}")
+                raise UserError(f"unknown camera field: {name}")
             parsed[name] = _coerce(name, value, CAMERA_FIELDS[name][1])
         if self._capture is not None:
             blocked = [n for n in parsed if not CAMERA_FIELDS[n][2]]
             if blocked:
-                raise UserError(f"עצרי את הצילום לפני שינוי {', '.join(blocked)}")
+                raise UserError(f"stop capture before changing {', '.join(blocked)}")
 
         def apply() -> dict:
             if not self.connected:
@@ -526,11 +526,11 @@ class CameraService:
 
     def set_segmentation(self, values: dict) -> dict:
         if self._capture is not None:
-            raise UserError("עצרי את הצילום לפני שינוי הגדרות החיתוך")
+            raise UserError("stop capture before changing segmentation settings")
         parsed = {}
         for name, value in values.items():
             if name not in SEGMENTATION_TYPES:
-                raise UserError(f"שדה חיתוך לא מוכר: {name}")
+                raise UserError(f"unknown segmentation field: {name}")
             parsed[name] = _coerce(name, value, SEGMENTATION_TYPES[name])
 
         def apply() -> None:
@@ -544,10 +544,10 @@ class CameraService:
 
     def set_storage(self, values: dict) -> dict:
         if self._capture is not None:
-            raise UserError("עצרי את הצילום לפני שינוי הגדרות השמירה")
+            raise UserError("stop capture before changing storage settings")
         for name, value in values.items():
             if name not in STORAGE_TYPES:
-                raise UserError(f"שדה שמירה לא מוכר: {name}")
+                raise UserError(f"unknown storage field: {name}")
             setattr(self.cfg.storage, name, _coerce(name, value, STORAGE_TYPES[name]))
         return self.settings()
 
@@ -585,11 +585,11 @@ class CameraService:
 
     def start_capture(self, mode: str) -> None:
         if mode not in ("birds", "tiles"):
-            raise UserError(f"מצב צילום לא מוכר: {mode}")
+            raise UserError(f"unknown capture mode: {mode}")
         if self._capture is not None:
-            raise UserError("כבר מצלם")
+            raise UserError("already capturing")
         if not self.grabbing:
-            raise UserError("המצלמה לא משדרת — בדקי חיבור")
+            raise UserError("camera is not streaming — check the connection")
         writer = AsyncWriter(self.cfg.storage, on_written=self._on_written).start()
         run = CaptureRun(mode=mode, started=time.time(), writer=writer)
 
@@ -618,7 +618,7 @@ class CameraService:
 
         run = self.call(detach)
         if run is None:
-            raise UserError("אין צילום פעיל")
+            raise UserError("no capture running")
         run.writer.stop()  # drains what is queued; may take a moment
         self.last_capture = {
             "mode": run.mode,
@@ -635,9 +635,9 @@ class CameraService:
 
     def set_sim_scene(self, scene: str) -> None:
         if not self.sim:
-            raise UserError("זמין רק בסימולטור")
+            raise UserError("only available in the simulator")
         if scene not in SCENES:
-            raise UserError(f"סצנה לא מוכרת: {scene}")
+            raise UserError(f"unknown scene: {scene}")
         self.call(lambda: setattr(self.cam, "scene", scene))
 
     def calibration_info(self) -> dict:
@@ -653,9 +653,9 @@ class CameraService:
 
     def _require_idle(self) -> None:
         if self._capture is not None:
-            raise UserError("עצרי את הצילום לפני כיול")
+            raise UserError("stop capture before calibrating")
         if not self.connected or self.nodes is None:
-            raise UserError("המצלמה לא מחוברת")
+            raise UserError("camera is not connected")
 
     def run_prnu(self) -> dict:
         self._require_idle()
@@ -698,7 +698,7 @@ class CameraService:
 
     def record(self, kind: str, note: str = "") -> dict:
         if kind not in RECORD_KINDS:
-            raise UserError(f"סוג רישום לא מוכר: {kind}")
+            raise UserError(f"unknown record kind: {kind}")
         st = self.stats() or {}
         return self.calib_log.append(
             kind, note=note, sharpness=st.get("sharpness"), flat=st.get("flat"),
@@ -707,7 +707,7 @@ class CameraService:
 
     def save_board_image(self) -> dict:
         if not self.grabbing:
-            raise UserError("המצלמה לא משדרת")
+            raise UserError("camera is not streaming")
         fut: concurrent.futures.Future = concurrent.futures.Future()
 
         def arm() -> None:

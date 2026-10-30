@@ -23,7 +23,7 @@ def create_app(service: CameraService) -> FastAPI:
 
     @app.exception_handler(TimeoutError)
     async def timeout_error(_, exc: TimeoutError):
-        return JSONResponse({"detail": f"המצלמה לא הגיבה בזמן: {exc}"}, status_code=504)
+        return JSONResponse({"detail": f"camera did not respond in time: {exc}"}, status_code=504)
 
     @app.get("/")
     def index():

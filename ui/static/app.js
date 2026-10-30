@@ -110,12 +110,12 @@ function mmss(sec) {
 function renderStatus(st) {
   status = st;
   const src = $("#pill-source");
-  src.textContent = st.source === "sim" ? "סימולטור" : `מצלמה ${st.device || ""}`;
+  src.textContent = st.source === "sim" ? "Simulator" : `Camera ${st.device || ""}`;
   src.className = `pill${st.source === "sim" ? " warn" : ""}`;
   const stream = $("#pill-stream");
-  if (st.connected && st.grabbing) { stream.textContent = "משדר"; stream.className = "pill ok"; }
-  else if (st.connected) { stream.textContent = "לא משדר"; stream.className = "pill warn"; }
-  else { stream.textContent = "מנותק"; stream.className = "pill bad"; }
+  if (st.connected && st.grabbing) { stream.textContent = "Streaming"; stream.className = "pill ok"; }
+  else if (st.connected) { stream.textContent = "Not streaming"; stream.className = "pill warn"; }
+  else { stream.textContent = "Disconnected"; stream.className = "pill bad"; }
   $("#pill-capture").classList.toggle("hidden", !st.capture);
   $("#pill-capture").className = `pill rec${st.capture ? "" : " hidden"}`;
   $("#m-rate").textContent = st.line_rate_measured ? `${fmt(st.line_rate_measured, 0)} Hz` : "—";
@@ -125,7 +125,7 @@ function renderStatus(st) {
 
   const cap = st.capture;
   const btn = $("#btn-capture");
-  btn.textContent = cap ? "עצור צילום" : "התחל צילום";
+  btn.textContent = cap ? "Stop capture" : "Start capture";
   btn.classList.toggle("stop", !!cap);
   btn.classList.toggle("primary", !cap);
   $("#capture-mode").disabled = !!cap;
@@ -144,13 +144,13 @@ function renderStatus(st) {
   $("#last-capture").classList.toggle("hidden", !lc || !!cap);
   if (lc) {
     $("#last-capture").textContent =
-      `הרצה אחרונה (${lc.started}): ${lc.written} נשמרו מתוך ${lc.cut} בתוך ${mmss(lc.seconds)}; נזרקו ${lc.dropped}, כשלים ${lc.failed}.`;
+      `Last run (${lc.started}): ${lc.written} of ${lc.cut} saved in ${mmss(lc.seconds)}; ${lc.dropped} dropped, ${lc.failed} failed.`;
   }
 
   const cut = st.last_cut;
   $("#seg-live").textContent = cut
-    ? `חיתוך אחרון: ניגודיות ${fmt(cut.contrast, 2)} · תיקון מרכז ${fmt(cut.error, 1)} שורות · מחזור ${fmt(cut.period, 1)} שורות`
-    : "הדליקי 'הצג מרכזי חיתוך' או התחילי צילום כדי לראות את החיתוך.";
+    ? `Last cut: contrast ${fmt(cut.contrast, 2)} · centre correction ${fmt(cut.error, 1)} lines · period ${fmt(cut.period, 1)} lines`
+    : "Turn on 'Show cut centres' or start a capture to see the segmentation.";
   $("#show-cuts").checked = st.show_cuts;
   Wizard.update({ status: st });
 }
@@ -159,7 +159,7 @@ async function pollStatus() {
   try {
     renderStatus(await api("/api/status"));
   } catch (e) {
-    $("#pill-stream").textContent = "אין תקשורת עם השרת";
+    $("#pill-stream").textContent = "No connection to the server";
     $("#pill-stream").className = "pill bad";
   }
   setTimeout(pollStatus, 1000);
@@ -205,8 +205,8 @@ function renderSettings(s) {
   settings = s;
   const ci = s.camera_info;
   $("#camera-info").innerHTML = [
-    ["דגם", ci.model], ["סריאלי", ci.serial ?? "—"], ["IP", ci.ip],
-  ].map(([k, v]) => `<div><span>${k}</span><b dir="ltr">${esc(v)}</b></div>`).join("");
+    ["Model", ci.model], ["Serial", ci.serial ?? "—"], ["IP", ci.ip],
+  ].map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("");
   CAM_FIELDS.forEach((f) => {
     const v = s.camera[f].value;
     fillField(`#cam-${f}`, f === "exposure_us" && v !== null ? Math.round(v) : v);
@@ -220,9 +220,9 @@ function renderSettings(s) {
   SEG_FIELDS.forEach((f) => fillField(`#seg-${f}`, s.segmentation[f]));
   const d = s.derived;
   $("#seg-derived").innerHTML = [
-    ["מחזור נומינלי", `${fmt(d.nominal_period_lines)} שורות`],
-    ["זמן לעוף", `${fmt(d.bird_ms)} ms`],
-    ["חלון", `${d.window_lines} שורות`],
+    ["Nominal period", `${fmt(d.nominal_period_lines)} lines`],
+    ["Time per bird", `${fmt(d.bird_ms)} ms`],
+    ["Window", `${d.window_lines} lines`],
   ].map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("");
 
   ST_FIELDS.forEach((f) => fillField(`#st-${f}`, s.storage[f]));
@@ -232,14 +232,14 @@ function renderSettings(s) {
 
 async function loadSettings() {
   try { renderSettings(await api("/api/settings")); }
-  catch (e) { toast(`טעינת הגדרות נכשלה: ${e.message}`, true); }
+  catch (e) { toast(`Loading settings failed: ${e.message}`, true); }
 }
 
 async function applySettings(path, values) {
   try {
     renderSettings(await api(path, values));
     setDirty(true);
-    toast("הוחל");
+    toast("Applied");
   } catch (e) {
     toast(e.message, true);
     loadSettings();
@@ -258,17 +258,17 @@ function changed(fields, prefix, current) {
 
 $("#btn-apply-camera").onclick = () => {
   const values = changed(CAM_FIELDS, "cam", settings.camera);
-  if (!Object.keys(values).length) return toast("אין שינויים");
+  if (!Object.keys(values).length) return toast("No changes");
   applySettings("/api/settings/camera", values);
 };
 $("#btn-apply-seg").onclick = () => {
   const values = changed(SEG_FIELDS, "seg", settings.segmentation);
-  if (!Object.keys(values).length) return toast("אין שינויים");
+  if (!Object.keys(values).length) return toast("No changes");
   applySettings("/api/settings/segmentation", values);
 };
 $("#btn-apply-storage").onclick = () => {
   const values = changed(ST_FIELDS, "st", settings.storage);
-  if (!Object.keys(values).length) return toast("אין שינויים");
+  if (!Object.keys(values).length) return toast("No changes");
   applySettings("/api/settings/storage", values);
 };
 
@@ -285,8 +285,8 @@ document.querySelectorAll("[data-save]").forEach((b) => {
     try {
       const r = await api("/api/settings/save", {});
       setDirty(false);
-      toast(`נשמר ל-${r.path}`);
-    } catch (e) { toast(`השמירה נכשלה: ${e.message}`, true); }
+      toast(`Saved to ${r.path}`);
+    } catch (e) { toast(`Save failed: ${e.message}`, true); }
   };
 });
 
@@ -303,11 +303,11 @@ $("#btn-capture").onclick = async () => {
   try {
     if (status && status.capture) {
       const r = await api("/api/capture/stop", {});
-      toast(`נעצר: ${r.written} תמונות נשמרו`);
+      toast(`Stopped: ${r.written} images saved`);
     } else {
       await api("/api/capture/start", { mode: $("#capture-mode").value });
       $("#recent").innerHTML = "";
-      toast("הצילום התחיל");
+      toast("Capture started");
     }
   } catch (e) {
     toast(e.message, true);
@@ -317,7 +317,7 @@ $("#btn-capture").onclick = async () => {
 };
 
 $("#btn-reconnect").onclick = async () => {
-  try { renderStatus(await api("/api/reconnect", {})); toast("חובר מחדש"); }
+  try { renderStatus(await api("/api/reconnect", {})); toast("Reconnected"); }
   catch (e) { toast(e.message, true); }
 };
 
@@ -327,19 +327,19 @@ async function refreshCalibration() {
   try {
     const c = await api("/api/calibration");
     Wizard.setCalibration(c);
-    const names = { prnu: "PRNU", user_set_saved: "נשמר ל-UserSet", focus: "פוקוס", flat: "אחידות",
-      board: "לוח כיול", shift_check: "בדיקת משמרת", exposure: "חשיפה" };
+    const names = { prnu: "PRNU", user_set_saved: "Saved to UserSet", focus: "Focus", flat: "Flatness",
+      board: "Calibration board", shift_check: "Shift check", exposure: "Exposure" };
     $("#calib-log").innerHTML = c.log.length ? c.log.slice().reverse().map((e) => {
       const bits = [];
-      if (["focus", "shift_check"].includes(e.action) && e.sharpness != null) bits.push(`חדות ${fmt(e.sharpness, 2)}`);
-      if (["flat", "shift_check"].includes(e.action) && e.flat) bits.push(`אחידות ${fmt(e.flat.spread)}`);
-      if (e.action === "prnu" && e.flat_before) bits.push(`אחידות לפני ${fmt(e.flat_before.spread)}`);
+      if (["focus", "shift_check"].includes(e.action) && e.sharpness != null) bits.push(`sharpness ${fmt(e.sharpness, 2)}`);
+      if (["flat", "shift_check"].includes(e.action) && e.flat) bits.push(`flatness ${fmt(e.flat.spread)}`);
+      if (e.action === "prnu" && e.flat_before) bits.push(`flatness before ${fmt(e.flat_before.spread)}`);
       if (e.note) bits.push(esc(e.note));
       if (e.file) bits.push(`<bdi>${esc(e.file)}</bdi>`);
       return `<div><time>${esc(e.time.replace("T", " "))}</time><b>${esc(names[e.action] || e.action)}</b> ${bits.join(" · ")}</div>`;
-    }).join("") : `<p class="hint">היומן ריק.</p>`;
+    }).join("") : `<p class="hint">The log is empty.</p>`;
   } catch (e) {
-    toast(`טעינת נתוני כיול נכשלה: ${e.message}`, true);
+    toast(`Loading calibration data failed: ${e.message}`, true);
   }
 }
 

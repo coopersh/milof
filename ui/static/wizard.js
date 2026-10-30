@@ -16,7 +16,7 @@ const Wizard = (() => {
 
   function simBox(scene, label) {
     if (!last.status || last.status.source !== "sim") return "";
-    return `<div class="sim-box">סימולטור: <button class="btn small" data-scene="${scene}">${label}</button></div>`;
+    return `<div class="sim-box">Simulator: <button class="btn small" data-scene="${scene}">${label}</button></div>`;
   }
 
   // --- verdicts used by both flows ---
@@ -27,87 +27,87 @@ const Wizard = (() => {
     const all = [r, g, b];
     const cls = all.every((v) => v >= 180 && v <= 200) && s.clip_hi < 0.1 ? "good"
       : all.every((v) => v >= 160 && v <= 215) ? "warn" : "bad";
-    const msg = cls === "good" ? "בטווח" : Math.max(...all) > 200 ? "בהיר מדי — הורידי חשיפה" : "כהה מדי — העלי חשיפה";
-    return `<div class="gauge">R/G/B <b dir="ltr">${fmt(r, 0)} / ${fmt(g, 0)} / ${fmt(b, 0)}</b> ${verdict(cls, msg)}</div>
-            <div class="hint">יעד 180–200 בכל ערוץ, בלי רוויה (כרגע <bdi>${fmt(s.clip_hi, 2)}%</bdi>).</div>`;
+    const msg = cls === "good" ? "In range" : Math.max(...all) > 200 ? "Too bright — lower exposure" : "Too dark — raise exposure";
+    return `<div class="gauge">R/G/B <b>${fmt(r, 0)} / ${fmt(g, 0)} / ${fmt(b, 0)}</b> ${verdict(cls, msg)}</div>
+            <div class="hint">Target 180–200 in every channel, no saturation (now ${fmt(s.clip_hi, 2)}%).</div>`;
   }
 
   function flatVerdict(s) {
     if (!s || !s.flat) return "";
     const f = s.flat;
     const cls = f.spread <= 6 ? "good" : f.spread <= 12 ? "warn" : "bad";
-    const msg = cls === "good" ? "אחיד" : cls === "warn" ? "כמעט — בדקי תאורה אחידה" : "לא אחיד — צריך PRNU";
-    return `<div class="gauge">הפרש לאורך הסנסור <b dir="ltr">${fmt(f.spread)}</b> רמות אפור
-            (<bdi>${fmt(f.spread_pct)}%</bdi>) ${verdict(cls, msg)}</div>
-            <div class="hint">יעד: עד 6 רמות אפור (בערך ±3). הגרף "פרופיל לאורך הסנסור" צריך להיות שטוח.</div>`;
+    const msg = cls === "good" ? "Flat" : cls === "warn" ? "Almost — check the lighting is even" : "Not flat — PRNU needed";
+    return `<div class="gauge">Spread along the sensor <b>${fmt(f.spread)}</b> grey levels
+            (${fmt(f.spread_pct)}%) ${verdict(cls, msg)}</div>
+            <div class="hint">Target: at most 6 grey levels (about ±3). The "Profile along the sensor" chart should be flat.</div>`;
   }
 
   function sharpVerdictVsReference(s) {
     if (!s || s.sharpness === undefined) return "";
     const ref = calib && calib.focus_reference;
     if (!ref) {
-      return `<div class="gauge">חדות <b dir="ltr">${fmt(s.sharpness, 2)}</b>
-              ${verdict("warn", "אין ערך ייחוס — הריצי כיול מלא")}</div>`;
+      return `<div class="gauge">Sharpness <b>${fmt(s.sharpness, 2)}</b>
+              ${verdict("warn", "No reference value — run a full calibration")}</div>`;
     }
     const ratio = s.sharpness / ref;
     const cls = ratio >= 0.9 ? "good" : ratio >= 0.75 ? "warn" : "bad";
-    const msg = cls === "good" ? "בפוקוס" : "ירידה בחדות — ייתכן שהמצלמה זזה";
-    return `<div class="gauge">חדות <b dir="ltr">${fmt(s.sharpness, 2)}</b> מתוך ייחוס
-            <bdi>${fmt(ref, 2)}</bdi> (<bdi>${fmt(ratio * 100, 0)}%</bdi>) ${verdict(cls, msg)}</div>`;
+    const msg = cls === "good" ? "In focus" : "Sharpness dropped — the camera may have moved";
+    return `<div class="gauge">Sharpness <b>${fmt(s.sharpness, 2)}</b> vs reference
+            ${fmt(ref, 2)} (${fmt(ratio * 100, 0)}%) ${verdict(cls, msg)}</div>`;
   }
 
   // --- steps ---
 
   const FULL = [
     {
-      title: "רשת וחיבור",
+      title: "Network",
       body: () => `<ul>
-          <li>המצלמה על IP קבוע ברשת <bdi>192.168.2.x</bdi> (pylon IP Configurator). לא <bdi>.1</bdi> ולא <bdi>.255</bdi>.</li>
-          <li>כרטיס הרשת של המחשב באותה רשת.</li>
-          <li>ה-IP בהגדרות: <bdi>${last.settings ? esc(last.settings.camera_info.ip) : "—"}</bdi>.</li>
+          <li>Camera on a static IP in <b>192.168.2.x</b> (pylon IP Configurator). Not .1 and not .255.</li>
+          <li>The PC's network adapter on the same subnet.</li>
+          <li>IP in the settings: <b>${last.settings ? esc(last.settings.camera_info.ip) : "—"}</b>.</li>
         </ul>`,
       live: () => {
         const st = last.status;
         if (!st) return "";
         const ok = st.connected && st.grabbing;
-        return `<div class="gauge">${verdict(ok ? "good" : "bad", ok ? "מחובר ומשדר" : st.connected ? "מחובר, לא משדר" : "לא מחובר")}
-                <span>קצב נמדד <b dir="ltr">${fmt(st.line_rate_measured, 0)}</b> Hz</span></div>`;
+        return `<div class="gauge">${verdict(ok ? "good" : "bad", ok ? "Connected and streaming" : st.connected ? "Connected, not streaming" : "Not connected")}
+                <span>Measured rate <b>${fmt(st.line_rate_measured, 0)}</b> Hz</span></div>`;
       },
     },
     {
-      title: "צמצם",
+      title: "Aperture",
       body: () => `<ul>
-          <li>הטבעת התחתונה בעדשה. עובדים ב-<b>f/5.6–f/8</b>; בריג הנוכחי f/5.6.</li>
-          <li>פתוח מדי (f/4): עומק שדה רדוד, חלקים מהעוף יוצאים מפוקוס. סגור מדי: צריך חשיפה ארוכה שהקצב לא מאפשר.</li>
-          <li><b>אחרי ה-PRNU לא נוגעים בצמצם</b> — שינוי מבטל את הכיול.</li>
+          <li>The lower ring on the lens. Work at <b>f/5.6–f/8</b>; the current rig uses f/5.6.</li>
+          <li>Too open (f/4): shallow depth of field, parts of the bird go out of focus. Too closed: needs an exposure the line rate doesn't allow.</li>
+          <li><b>Don't touch the aperture after PRNU</b> — changing it invalidates the calibration.</li>
         </ul>`,
     },
     {
-      title: "הוצאה מפוקוס",
+      title: "Defocus",
       body: () => `<ol>
-          <li>משחררים את בורג הפוקוס.</li>
-          <li>מסובבים את הטבעת העליונה עד הסוף לכיוון אינסוף.</li>
-          <li>בודקים עם תרשים הפסים: אם הפסים נעלמו בתצוגה — יצאנו מפוקוס, וזה המצב הרצוי לכיול הלבן.</li>
-        </ol>${simBox("stripes", "הצג תרשים פסים")}`,
+          <li>Loosen the focus screw.</li>
+          <li>Turn the upper ring all the way towards infinity.</li>
+          <li>Check with the stripe chart: if the stripes disappear in the live view, the lens is defocused — which is what the white calibration needs.</li>
+        </ol>${simBox("stripes", "Show stripe chart")}`,
       live: () => {
         const s = last.stats;
         if (!s || s.sharpness === undefined) return "";
-        return `<div class="gauge">חדות עכשיו <b dir="ltr">${fmt(s.sharpness, 2)}</b></div>
-                <div class="hint">המספר צריך לרדת משמעותית ככל שהפסים נמרחים.</div>`;
+        return `<div class="gauge">Sharpness now <b>${fmt(s.sharpness, 2)}</b></div>
+                <div class="hint">The number should drop noticeably as the stripes blur.</div>`;
       },
     },
     {
-      title: "דף לבן וחשיפה",
+      title: "White sheet & exposure",
       body: () => `<ol>
-          <li>המסוע <b>עצור</b>. דף לבן חלק (בלי קמטים וסימונים) מתחת למצלמה.</li>
-          <li>מורידים את המעלית ל-<b>0</b> באפליקציית הטכנאי, כדי שהתאורה על הדף תהיה אחידה.</li>
-          <li>מכוונים חשיפה עד שכל ערוץ ב-<b>180–200</b> (בריג הייחוס בערך 270µs).</li>
+          <li>Conveyor <b>stopped</b>. A clean white sheet (no creases or marks) under the camera.</li>
+          <li>Lower the lift to <b>0</b> in the technician app so the light on the sheet is even.</li>
+          <li>Adjust exposure until every channel reads <b>180–200</b> (about 270 µs on the reference rig).</li>
         </ol>
         <div class="slider-row">
-          <label>חשיפה (µs)</label>
+          <label>Exposure (µs)</label>
           <input type="number" id="wiz-exposure" step="1" style="width:110px">
-          <button class="btn small" id="wiz-exposure-apply">החל</button>
-        </div>${simBox("white", "הצג דף לבן")}`,
+          <button class="btn small" id="wiz-exposure-apply">Apply</button>
+        </div>${simBox("white", "Show white sheet")}`,
       mount: (card) => {
         const input = card.querySelector("#wiz-exposure");
         if (last.settings) input.value = Math.round(last.settings.camera.exposure_us.value || 0);
@@ -116,13 +116,13 @@ const Wizard = (() => {
       live: () => rgbVerdict(last.stats),
     },
     {
-      title: "הרצת PRNU",
+      title: "Run PRNU",
       body: () => {
         const n = calib && calib.nodes;
         const missing = calib ? calib.missing_prnu : [];
         if (!n || missing.length) {
-          return `<p>${verdict("bad", "לא נמצאו הגדרות shading correction במצלמה")}</p>
-                  <p class="hint">חסר: <bdi>${esc(missing.join(", "))}</bdi>. אפשר להריץ ידנית ב-pylon Viewer:
+          return `<p>${verdict("bad", "No shading-correction nodes found on the camera")}</p>
+                  <p class="hint">Missing: ${esc(missing.join(", "))}. You can run it manually in pylon Viewer:
                   Image Processing Control → Color Space = Off, Light Source Preset = Off →
                   Shading Correction Selector = PRNU → User → Execute.</p>`;
         }
@@ -133,79 +133,79 @@ const Wizard = (() => {
           `${n.shading_mode} = User`,
           `${n.shading_create}()  ← execute`,
         ].filter(Boolean).map(esc);
-        return `<p>המצלמה תלמד את דפוס האחידות מהדף הלבן ותשמור אותו בזיכרון שלה. ודאי לפני הלחיצה:
-                  מחוץ לפוקוס, מסוע עצור, דף לבן, ערוצים ב-180–200.</p>
+        return `<p>The camera learns the flatness pattern from the white sheet and stores it in its own memory. Before clicking, make sure:
+                  defocused, conveyor stopped, white sheet, channels at 180–200.</p>
                 <div class="note nodes">${rows.join("<br>")}</div>
-                <div class="actions"><button class="btn danger" id="wiz-prnu">הרץ PRNU</button></div>`;
+                <div class="actions"><button class="btn danger" id="wiz-prnu">Run PRNU</button></div>`;
       },
       mount: (card) => {
         const btn = card.querySelector("#wiz-prnu");
         if (!btn) return;
         btn.onclick = async () => {
-          const ok = await ctx.confirm("להריץ PRNU?",
-            "הפעולה כותבת כיול חדש לזיכרון המצלמה ומחליפה את הקודם. ודאי שהמצלמה מחוץ לפוקוס ומול דף לבן מואר באחידות.");
+          const ok = await ctx.confirm("Run PRNU?",
+            "This writes a new calibration to the camera's memory, replacing the previous one. Make sure the camera is defocused and facing an evenly lit white sheet.");
           if (!ok) return;
           btn.disabled = true;
-          btn.textContent = "מריץ… (כמה שניות)";
+          btn.textContent = "Running… (a few seconds)";
           try {
             await ctx.api("/api/calibration/prnu", {});
-            ctx.toast("PRNU הסתיים ונשמר במצלמה");
+            ctx.toast("PRNU finished and stored in the camera");
             done.add(index);
             await ctx.refreshCalibration();
             go(index + 1);
           } catch (e) {
-            ctx.toast(`PRNU נכשל: ${e.message}`, true);
+            ctx.toast(`PRNU failed: ${e.message}`, true);
             btn.disabled = false;
-            btn.textContent = "הרץ PRNU";
+            btn.textContent = "Run PRNU";
           }
         };
       },
       live: () => rgbVerdict(last.stats),
     },
     {
-      title: "אימות אחידות",
+      title: "Verify flatness",
       body: () => `<ol>
-          <li>התמונה של הדף הלבן צריכה להיות שטוחה לכל אורך הסנסור.</li>
-          <li><b>בדיקת כיבוי:</b> כבי והדליקי את המצלמה, לחצי "חיבור מחדש" ובדקי שוב. אם האחידות נעלמה — שמרי למצלמה (UserSet1) כדי שתיטען בהדלקה.</li>
+          <li>The white sheet should look flat along the whole sensor.</li>
+          <li><b>Power-cycle check:</b> switch the camera off and on, click "Reconnect" and check again. If the flatness is gone, save to the camera (UserSet1) so it loads at power-up.</li>
         </ol>
         <div class="actions">
-          <button class="btn" id="wiz-record-flat">רשום אימות</button>
-          <button class="btn danger" id="wiz-user-set">שמור במצלמה (UserSet1)</button>
-        </div>${simBox("white", "הצג דף לבן")}`,
+          <button class="btn" id="wiz-record-flat">Record check</button>
+          <button class="btn danger" id="wiz-user-set">Save to camera (UserSet1)</button>
+        </div>${simBox("white", "Show white sheet")}`,
       mount: (card) => {
-        card.querySelector("#wiz-record-flat").onclick = () => record("flat", "אימות אחרי PRNU");
+        card.querySelector("#wiz-record-flat").onclick = () => record("flat", "verified after PRNU");
         card.querySelector("#wiz-user-set").onclick = async () => {
-          const ok = await ctx.confirm("לשמור הגדרות במצלמה?",
-            "כל ההגדרות הנוכחיות של המצלמה יישמרו ב-UserSet1, והמצלמה תטען אותן בכל הדלקה.");
+          const ok = await ctx.confirm("Save settings to the camera?",
+            "All current camera settings are saved to UserSet1, and the camera loads them at every power-up.");
           if (!ok) return;
           try {
             await ctx.api("/api/calibration/user-set", {});
-            ctx.toast("נשמר ב-UserSet1 ומוגדר כברירת מחדל בהדלקה");
+            ctx.toast("Saved to UserSet1 and set as the power-up default");
             await ctx.refreshCalibration();
           } catch (e) {
-            ctx.toast(`השמירה נכשלה: ${e.message}`, true);
+            ctx.toast(`Save failed: ${e.message}`, true);
           }
         };
       },
       live: () => flatVerdict(last.stats),
     },
     {
-      title: "פוקוס",
+      title: "Focus",
       body: () => `<ol>
-          <li>תרשים הפסים מתחת למצלמה, <b>הפסים לרוחב</b> קו הסנסור.</li>
-          <li>מעלים את המעלית לגובה העבודה <b>33</b>.</li>
-          <li>אם התמונה כהה — מעלים חשיפה. בקצב 3000Hz החשיפה מוגבלת ל-333µs; אם מורידים קצב זמנית, <b>להחזיר אחרי</b>.</li>
-          <li>מסובבים את הטבעת העליונה עד שהחדות מקסימלית. עוברים את השיא וחוזרים אליו.</li>
-          <li>נועלים את הבורג ולוחצים "רשום ערך פוקוס" — זה הייחוס לבדיקות המשמרת.</li>
+          <li>Stripe chart under the camera, <b>stripes across</b> the sensor line.</li>
+          <li>Raise the lift to the working height, <b>33</b>.</li>
+          <li>If the image is dark, raise exposure. At 3000 Hz exposure is capped at 333 µs; if you lower the line rate temporarily, <b>restore it afterwards</b>.</li>
+          <li>Turn the upper ring until sharpness peaks. Go past the peak and come back to it.</li>
+          <li>Lock the screw and click "Record focus value" — this is the reference for shift checks.</li>
         </ol>
         <div class="actions">
-          <button class="btn small" id="wiz-peak-reset">אפס שיא</button>
-          <button class="btn primary" id="wiz-record-focus">רשום ערך פוקוס</button>
-        </div>${simBox("stripes", "הצג תרשים פסים")}`,
+          <button class="btn small" id="wiz-peak-reset">Reset peak</button>
+          <button class="btn primary" id="wiz-record-focus">Record focus value</button>
+        </div>${simBox("stripes", "Show stripe chart")}`,
       mount: (card) => {
         peakSharp = 0;
         card.querySelector("#wiz-peak-reset").onclick = () => { peakSharp = 0; };
-        card.querySelector("#wiz-record-focus").onclick = () => record("focus", "פוקוס ננעל");
+        card.querySelector("#wiz-record-focus").onclick = () => record("focus", "focus locked");
       },
       live: () => {
         const s = last.stats;
@@ -213,62 +213,62 @@ const Wizard = (() => {
         peakSharp = Math.max(peakSharp, s.sharpness);
         const ratio = peakSharp ? s.sharpness / peakSharp : 0;
         const cls = ratio >= 0.97 ? "good" : ratio >= 0.85 ? "warn" : "bad";
-        return `<div class="gauge">חדות <b dir="ltr">${fmt(s.sharpness, 2)}</b>
-                שיא <bdi>${fmt(peakSharp, 2)}</bdi> ${verdict(cls, cls === "good" ? "בשיא" : "רחוק מהשיא")}</div>`;
+        return `<div class="gauge">Sharpness <b>${fmt(s.sharpness, 2)}</b>
+                peak ${fmt(peakSharp, 2)} ${verdict(cls, cls === "good" ? "At peak" : "Away from peak")}</div>`;
       },
     },
     {
-      title: "לוח כיול",
+      title: "Calibration board",
       body: () => `<ol>
-          <li>הלוח הרשמי (לא תרשים הפסים).</li>
-          <li>מניחים אותו על המסוע הנע, או מזיזים אותו לאט מתחת למצלמה — הסורק צריך תנועה כדי לבנות תמונה דו-ממדית.</li>
-          <li>לוחצים "שמור תמונת לוח": נשמרות 2048 שורות ברזולוציה מלאה (PNG). החישוב של מ"מ לפיקסל ידני בשלב הזה.</li>
+          <li>The official board (not the stripe chart).</li>
+          <li>Put it on the moving conveyor, or move it slowly under the camera — a line scanner needs motion to build a 2-D image.</li>
+          <li>Click "Save board image": 2048 full-resolution lines are saved (PNG). The mm-per-pixel calculation is manual for now.</li>
         </ol>
-        <div class="actions"><button class="btn primary" id="wiz-board">שמור תמונת לוח</button></div>
+        <div class="actions"><button class="btn primary" id="wiz-board">Save board image</button></div>
         <div id="wiz-board-result" class="hint"></div>`,
       mount: (card) => {
         card.querySelector("#wiz-board").onclick = async () => {
           try {
             const r = await ctx.api("/api/calibration/board", {});
-            card.querySelector("#wiz-board-result").innerHTML = `נשמר: <bdi>${esc(r.file)}</bdi>`;
+            card.querySelector("#wiz-board-result").innerHTML = `Saved: <bdi>${esc(r.file)}</bdi>`;
             await ctx.refreshCalibration();
           } catch (e) {
-            ctx.toast(`השמירה נכשלה: ${e.message}`, true);
+            ctx.toast(`Save failed: ${e.message}`, true);
           }
         };
       },
     },
     {
-      title: "סיום",
+      title: "Finish",
       body: () => `<ul>
-          <li>חזרה לקצב העבודה (3000Hz) וחשיפה בתקרה (כ-330µs).</li>
-          <li>עם עופות על הקו: ממוצע 100–150, רוויה מתחת ל-1% (ההיסטוגרמה).</li>
-          <li>שומרים את ההגדרות לקובץ: לשונית "מצלמה" ← "שמור לקובץ".</li>
-          <li>מעכשיו מספיקה "בדיקת משמרת" בתחילת כל משמרת.</li>
+          <li>Back to the working line rate (3000 Hz) with exposure at the ceiling (about 330 µs).</li>
+          <li>With birds on the line: mean 100–150, saturation below 1% (see the histogram).</li>
+          <li>Save the settings to file: "Camera" tab → "Save to file".</li>
+          <li>From now on a "Shift check" at the start of each shift is enough.</li>
         </ul>`,
     },
   ];
 
   const SHIFT = [
     {
-      title: "דף לבן",
-      body: () => `<p>דף לבן מתחת למצלמה, מסוע עצור. הפרופיל צריך להיות שטוח, בלי פסים אנכיים. אם לא — כיול מלא מחדש (שלב PRNU).</p>${simBox("white", "הצג דף לבן")}`,
+      title: "White sheet",
+      body: () => `<p>White sheet under the camera, conveyor stopped. The profile should be flat, with no vertical stripes. If not — run a full calibration again (PRNU step).</p>${simBox("white", "Show white sheet")}`,
       live: () => flatVerdict(last.stats),
     },
     {
-      title: "פוקוס",
-      body: () => `<p>תרשים הפסים מתחת למצלמה, בגובה העבודה. החדות צריכה להיות קרובה לערך שנרשם בכיול.</p>${simBox("stripes", "הצג תרשים פסים")}`,
+      title: "Focus",
+      body: () => `<p>Stripe chart under the camera at working height. Sharpness should be close to the value recorded at calibration.</p>${simBox("stripes", "Show stripe chart")}`,
       live: () => sharpVerdictVsReference(last.stats),
     },
     {
-      title: "פסים אופקיים",
-      body: () => `<p>מסוע ריק רץ, תאורה דלוקה. בתצוגה החיה לא אמורים להופיע פסים לרוחב הזמן (הבהוב). אם יש — בעיה בתאורה, לא בתוכנה.</p>${simBox("birds", "הצג קו רץ")}`,
+      title: "Horizontal stripes",
+      body: () => `<p>Empty conveyor running, lights on. The live view should show no stripes across time (flicker). If there are, it's a lighting problem, not software.</p>${simBox("birds", "Show running line")}`,
     },
     {
-      title: "רישום",
-      body: () => `<p>רושמים את תוצאת הבדיקה ביומן, עם הערכים הנוכחיים.</p>
-        <label class="field">הערה <input type="text" id="wiz-shift-note" placeholder="למשל: הכל תקין"></label>
-        <div class="actions"><button class="btn primary" id="wiz-shift-record">רשום בדיקת משמרת</button></div>`,
+      title: "Record",
+      body: () => `<p>Record the check result in the log, with the current values.</p>
+        <label class="field">Note <input type="text" id="wiz-shift-note" placeholder="e.g. all OK"></label>
+        <div class="actions"><button class="btn primary" id="wiz-shift-record">Record shift check</button></div>`,
       mount: (card) => {
         card.querySelector("#wiz-shift-record").onclick = () =>
           record("shift_check", card.querySelector("#wiz-shift-note").value);
@@ -279,11 +279,11 @@ const Wizard = (() => {
   async function record(kind, note) {
     try {
       await ctx.api("/api/calibration/record", { kind, note });
-      ctx.toast("נרשם ביומן");
+      ctx.toast("Recorded in the log");
       done.add(index);
       await ctx.refreshCalibration();
     } catch (e) {
-      ctx.toast(`הרישום נכשל: ${e.message}`, true);
+      ctx.toast(`Recording failed: ${e.message}`, true);
     }
   }
 
@@ -291,12 +291,12 @@ const Wizard = (() => {
 
   function render() {
     if (!mode) {
-      el.innerHTML = `<p>בחרי מה לעשות:</p>
+      el.innerHTML = `<p>What do you want to do?</p>
         <div class="wiz-mode">
-          <button class="btn primary" data-mode="shift">בדיקת תחילת משמרת (דקה)</button>
-          <button class="btn" data-mode="full">כיול מלא</button>
+          <button class="btn primary" data-mode="shift">Start-of-shift check (1 min)</button>
+          <button class="btn" data-mode="full">Full calibration</button>
         </div>
-        <p class="hint">כיול מלא עושים בהתקנה, ושוב כשמזיזים תאורה, משנים צמצם או מרחק, או כשמופיעים פסים אנכיים.</p>`;
+        <p class="hint">Full calibration is done at installation, and again when the lights move, the aperture or distance changes, or vertical stripes appear.</p>`;
       el.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { mode = b.dataset.mode; go(0); }));
       return;
     }
@@ -304,7 +304,7 @@ const Wizard = (() => {
     const step = list[index];
     el.innerHTML = `
       <div class="wiz-mode">
-        <button class="btn small" id="wiz-back-mode">← ${mode === "full" ? "כיול מלא" : "בדיקת משמרת"}</button>
+        <button class="btn small" id="wiz-back-mode">← ${mode === "full" ? "Full calibration" : "Shift check"}</button>
       </div>
       <div class="wiz-steps">${list.map((s, i) =>
         `<button data-step="${i}" class="${i === index ? "current" : done.has(i) ? "done" : ""}">${i + 1}. ${s.title}</button>`).join("")}</div>
@@ -313,8 +313,8 @@ const Wizard = (() => {
         ${step.body()}
         <div class="wiz-live"></div>
         <div class="actions">
-          <button class="btn" id="wiz-prev" ${index === 0 ? "disabled" : ""}>הקודם</button>
-          <button class="btn primary" id="wiz-next" ${index === list.length - 1 ? "disabled" : ""}>הבא</button>
+          <button class="btn" id="wiz-prev" ${index === 0 ? "disabled" : ""}>Back</button>
+          <button class="btn primary" id="wiz-next" ${index === list.length - 1 ? "disabled" : ""}>Next</button>
         </div>
       </div>`;
     el.querySelector("#wiz-back-mode").onclick = () => { mode = null; done.clear(); render(); };
