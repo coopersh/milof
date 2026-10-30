@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
+
 # Preferred verbs for the command that builds the shading correction, best first.
 _CREATE_VERBS = ("create", "execute", "collect", "generate", "start", "acquire")
 _NOT_CREATE = ("load", "save", "reset", "clear", "default", "abort", "stop")
@@ -138,6 +140,74 @@ def save_user_set(cam, nodes: Nodes, user_set: str = "UserSet1") -> list[str]:
     cam.set(nodes.user_set_default, _option(cam, nodes.user_set_default, user_set))
     return [f"{nodes.user_set_selector}={target}", f"{nodes.user_set_save}()",
             f"{nodes.user_set_default}={target}"]
+
+
+def read_back(cam, node: str | None) -> str | None:
+    """A node's current value as text, or None if it is absent or unreadable."""
+    if node is None:
+        return None
+    try:
+        return str(cam.get(node))
+    except Exception:  # noqa: BLE001 — a missing value is reported, not raised
+        return None
+
+
+# --- checks on what a calibration step produced: [{"ok": bool, "msg": str}, ...] ---
+# They only advise the operator; nothing is blocked on them.
+
+FLAT_MAX = 6.0  # grey levels of spread along the sensor on the white sheet
+
+
+def check(ok: bool, msg: str) -> dict:
+    return {"ok": bool(ok), "msg": msg}
+
+
+def check_prnu(nodes: Nodes, mode: str | None, before: dict | None, after: dict | None) -> list[dict]:
+    out = []
+    if nodes.shading_mode is not None:
+        out.append(check(mode is not None and mode.lower() == "user",
+                         f"camera reports {nodes.shading_mode}={mode or 'unreadable'}"))
+    if after is None:
+        out.append(check(False, "no flatness measurement after PRNU"))
+    else:
+        was = f"{before['spread']:.1f} → " if before else ""
+        out.append(check(after["spread"] <= FLAT_MAX,
+                         f"spread along the sensor {was}{after['spread']:.1f} grey levels "
+                         f"(at most {FLAT_MAX:.0f})"))
+    return out
+
+
+def check_user_set(nodes: Nodes, default: str | None, user_set: str = "UserSet1") -> list[dict]:
+    return [check(default is not None and default.lower() == user_set.lower(),
+                  f"power-up default {nodes.user_set_default}={default or 'unreadable'}")]
+
+
+def check_board(gray) -> list[dict]:
+    """`gray`: the saved board image as (lines along the motion, sensor pixels), uint8."""
+    g = gray.astype(np.float32)
+    mean = float(g.mean())
+    sat = float((gray >= 255).mean() * 100)
+    out = [check(40 <= mean <= 230 and sat < 1.0,
+                 f"brightness: mean {mean:.0f}, saturated {sat:.1f}%"
+                 + ("" if 40 <= mean <= 230 else " — too dark" if mean < 40 else " — too bright"))]
+    # a board on the belt shows as lines with texture across the sensor
+    texture = g.std(axis=1)
+    thr = max(8.0, 0.5 * float(np.percentile(texture, 95)))
+    rows = np.flatnonzero(texture > thr)
+    if len(rows) < 0.05 * len(g):
+        out.append(check(False, "no board found in the image — click as the board reaches the camera"))
+        return out
+    edge = max(2, int(0.02 * len(g)))
+    cut = rows[0] < edge or rows[-1] >= len(g) - edge
+    out.append(check(not cut, "board fits in the image" if not cut else
+                     "board touches the start or end of the image — it may be cut off; try again"))
+    # a board that did not move gives identical lines: no detail along the motion axis
+    along = float(np.abs(np.diff(g[rows], axis=0)).mean())
+    across = float(np.abs(np.diff(g[rows], axis=1)).mean())
+    moving = along >= 0.1 * max(across, 1e-6)
+    out.append(check(moving, "board moved under the camera" if moving else
+                     "every line is the same — the board must move under the camera"))
+    return out
 
 
 class CalibrationLog:

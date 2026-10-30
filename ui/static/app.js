@@ -44,7 +44,12 @@ function confirmDialog(title, text) {
   });
 }
 
-function setDirty(on) { $("#pill-dirty").classList.toggle("hidden", !on); }
+// the server compares the live settings with config/camera.yaml
+function setDirty(unsaved) {
+  const pill = $("#pill-dirty");
+  pill.classList.toggle("hidden", !unsaved.length);
+  pill.title = `Not saved to file: ${unsaved.join(", ")}`;
+}
 
 // --- tabs ---
 
@@ -152,6 +157,7 @@ function renderStatus(st) {
     ? `Last cut: contrast ${fmt(cut.contrast, 2)} · centre correction ${fmt(cut.error, 1)} lines · period ${fmt(cut.period, 1)} lines`
     : "Turn on 'Show cut centres' or start a capture to see the segmentation.";
   $("#show-cuts").checked = st.show_cuts;
+  setDirty(st.unsaved || []);
   Wizard.update({ status: st });
 }
 
@@ -238,7 +244,6 @@ async function loadSettings() {
 async function applySettings(path, values) {
   try {
     renderSettings(await api(path, values));
-    setDirty(true);
     toast("Applied");
   } catch (e) {
     toast(e.message, true);
@@ -284,7 +289,6 @@ document.querySelectorAll("[data-save]").forEach((b) => {
   b.onclick = async () => {
     try {
       const r = await api("/api/settings/save", {});
-      setDirty(false);
       toast(`Saved to ${r.path}`);
     } catch (e) { toast(`Save failed: ${e.message}`, true); }
   };

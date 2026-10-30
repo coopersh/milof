@@ -126,6 +126,7 @@ b.good { color: var(--ok); } b.warn { color: var(--warn); } b.bad { color: var(-
 }
 .wiz-steps button.ok { color: var(--ok); border-color: #2a6b45; }
 .wiz-steps button.fail { color: var(--bad); border-color: #6b2a2a; }
+.wiz-steps button.warn { color: var(--warn); border-color: #6b5a2a; }
 .wiz-steps button.current { color: var(--text); border-color: var(--accent); }
 .wiz-label {
   font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
@@ -142,6 +143,8 @@ b.good { color: var(--ok); } b.warn { color: var(--warn); } b.bad { color: var(-
 .wiz-summary-list li { color: var(--muted); }
 .wiz-summary-list li.good { color: var(--ok); }
 .wiz-summary-list li.bad { color: var(--bad); }
+.wiz-summary-list li.warn { color: var(--warn); }
+.wiz-board { display: block; max-width: 100%; margin: 8px 0; border-radius: 6px; border: 1px solid var(--line); }
 .wiz-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .wiz-card h4 { margin: 0 0 8px; font-size: 16px; }
 .wiz-card ol, .wiz-card ul { padding-inline-start: 20px; margin: 6px 0; }

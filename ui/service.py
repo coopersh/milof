@@ -24,7 +24,7 @@ import cv2
 import numpy as np
 
 from acquisition.camera import BaslerLineScan, Block
-from acquisition.config import Config, SegmentationConfig, save_values
+from acquisition.config import Config, SegmentationConfig, load_config, save_values
 from acquisition.segmenter import BirdWindow, make_segmenter
 from acquisition.writer import AsyncWriter, orient
 
@@ -166,6 +166,7 @@ class CameraService:
         self._capture: CaptureRun | None = None
         self._recent: deque[dict] = deque(maxlen=RECENT)
         self._snap: list | None = None  # [lines still needed, parts, future]
+        self._file_cfg: tuple[float, Config] | None = None  # (mtime, config as on file)
 
     # --- lifecycle ---
 
@@ -432,6 +433,7 @@ class CameraService:
             "grabbing": self.grabbing,
             "error": self.error,
             "warning": self._rate_warning(),
+            "unsaved": self.unsaved_settings(),
             "blocks": self.blocks,
             "lost_frames": self.lost_frames,
             "timeouts": self.timeouts,
@@ -580,18 +582,45 @@ class CameraService:
         self.calib_dir = self.cfg.storage.data_dir / ("calibration_sim" if self.sim else "calibration")
         self.calib_log = calibration.CalibrationLog(self.calib_dir / "calibration_log.jsonl")
 
+    def _saved_values(self) -> dict:
+        c, s, st = self.cfg.camera, self.cfg.segmentation, self.cfg.storage
+        return {
+            "camera": {name: getattr(c, name) for name in CAMERA_FIELDS},
+            "segmentation": {f.name: getattr(s, f.name) for f in fields(SegmentationConfig)},
+            "storage": {**{name: getattr(st, name) for name in STORAGE_TYPES},
+                        "data_dir": st.data_dir.as_posix()},
+        }
+
+    def unsaved_settings(self) -> list[str]:
+        """Settings that differ from config/camera.yaml, as "section.field"."""
+        try:
+            mtime = self.config_path.stat().st_mtime
+            if self._file_cfg is None or self._file_cfg[0] != mtime:
+                self._file_cfg = (mtime, load_config(self.config_path))
+            on_file = self._file_cfg[1]
+        except Exception:  # noqa: BLE001 — an unreadable file means nothing is saved
+            return ["config file unreadable"]
+        on_file = {"camera": on_file.camera, "segmentation": on_file.segmentation,
+                   "storage": on_file.storage}
+        out = []
+        for section, values in self._saved_values().items():
+            for name, value in values.items():
+                saved = getattr(on_file[section], name)
+                if name == "data_dir":
+                    saved = saved.as_posix()
+                # the camera reads some floats back slightly off what was written
+                close = (isinstance(value, float) and isinstance(saved, (int, float))
+                         and abs(saved - value) <= 1e-3 * max(1.0, abs(value)))
+                if saved != value and not close:
+                    out.append(f"{section}.{name}")
+        return out
+
     def save_config(self) -> dict:
         backup_dir = self.cfg.storage.data_dir / "config_backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup = backup_dir / f"camera_{datetime.now():%Y%m%d_%H%M%S}.yaml"
         shutil.copy2(self.config_path, backup)
-        c, s, st = self.cfg.camera, self.cfg.segmentation, self.cfg.storage
-        save_values(self.config_path, {
-            "camera": {name: getattr(c, name) for name in CAMERA_FIELDS},
-            "segmentation": {f.name: getattr(s, f.name) for f in fields(SegmentationConfig)},
-            "storage": {**{name: getattr(st, name) for name in STORAGE_TYPES},
-                        "data_dir": st.data_dir.as_posix()},
-        })
+        save_values(self.config_path, self._saved_values())
         return {"path": str(self.config_path), "backup": str(backup)}
 
     # --- segmentation preview and capture ---
@@ -672,12 +701,13 @@ class CameraService:
 
     def calibration_info(self) -> dict:
         nodes = self.nodes
-        focus = self.calib_log.last("focus")
+        focus = [e for e in self.calib_log.entries(1000) if e["action"] == "focus"]
         return {
             "nodes": asdict(nodes) if nodes else None,
             "missing_prnu": nodes.missing_for_prnu() if nodes else ["camera"],
             "missing_user_set": nodes.missing_for_user_set() if nodes else ["camera"],
-            "focus_reference": focus.get("sharpness") if focus else None,
+            "focus_reference": focus[-1].get("sharpness") if focus else None,
+            "focus_previous": focus[-2].get("sharpness") if len(focus) > 1 else None,
             "log": self.calib_log.entries(30),
         }
 
@@ -708,7 +738,18 @@ class CameraService:
                     self.cam.start()
 
         steps = self.call(op, timeout=120)
-        return self.calib_log.append("prnu", steps=steps, flat_before=before)
+        after = self._fresh_stats().get("flat")
+        mode = self.call(lambda: calibration.read_back(self.cam, nodes.shading_mode))
+        return self.calib_log.append("prnu", steps=steps, flat_before=before, flat_after=after,
+                                     checks=calibration.check_prnu(nodes, mode, before, after))
+
+    def _fresh_stats(self, blocks: int = 4, timeout: float = 5.0) -> dict:
+        """Stats from lines grabbed after now — e.g. once a new correction is active."""
+        start = self.blocks
+        end = time.monotonic() + timeout
+        while self.blocks < start + blocks and time.monotonic() < end:
+            time.sleep(0.05)
+        return self.stats() or {}
 
     def save_user_set(self) -> dict:
         self._require_idle()
@@ -724,7 +765,9 @@ class CameraService:
                     self.cam.start()
 
         steps = self.call(op, timeout=60)
-        return self.calib_log.append("user_set_saved", steps=steps)
+        default = self.call(lambda: calibration.read_back(self.cam, nodes.user_set_default))
+        return self.calib_log.append("user_set_saved", steps=steps,
+                                     checks=calibration.check_user_set(nodes, default))
 
     def record(self, kind: str, note: str = "") -> dict:
         if kind not in RECORD_KINDS:
@@ -752,4 +795,16 @@ class CameraService:
         if not cv2.imwrite(str(path), orient(lines, self.cfg.storage)):
             raise OSError(f"could not write {path}")
         return self.calib_log.append("board", file=str(path),
-                                     line_rate_hz=self.cfg.camera.line_rate_hz)
+                                     line_rate_hz=self.cfg.camera.line_rate_hz,
+                                     checks=calibration.check_board(lines.mean(axis=2)))
+
+    def board_preview_jpeg(self, width: int = 440) -> bytes | None:
+        """The last saved board image, small, for the wizard to show."""
+        entry = self.calib_log.last("board")
+        img = cv2.imread(entry["file"]) if entry else None
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        small = cv2.resize(img, (width, max(1, round(h * width / w))), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return buf.tobytes() if ok else None

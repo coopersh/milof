@@ -124,6 +124,13 @@ def create_app(service: CameraService) -> FastAPI:
     def board():
         return service.save_board_image()
 
+    @app.get("/api/calibration/board.jpg")
+    def board_preview():
+        jpeg = service.board_preview_jpeg()
+        if jpeg is None:
+            raise HTTPException(404, "no board image saved yet")
+        return Response(jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
     @app.post("/api/sim/scene")
     def sim_scene(scene: str = Body(..., embed=True)):
         service.set_sim_scene(scene)

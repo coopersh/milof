@@ -69,9 +69,48 @@ def test_prnu_flattens_white(service):
     service.set_sim_scene("white")
     time.sleep(0.5)
     assert service.stats()["flat"]["spread"] > 20  # lens/light fall-off before correction
-    service.run_prnu()
+    entry = service.run_prnu()
     wait_for(lambda: service.stats()["flat"]["spread"] < 3)
     assert service.calibration_info()["log"][-1]["action"] == "prnu"
+    assert entry["flat_after"]["spread"] < entry["flat_before"]["spread"]
+    assert entry["checks"] and all(c["ok"] for c in entry["checks"]), entry["checks"]
+
+
+def test_user_set_is_read_back(service):
+    entry = service.save_user_set()
+    assert [c["ok"] for c in entry["checks"]] == [True]
+    assert "UserSet1" in entry["checks"][0]["msg"]
+
+
+def test_board_image_is_checked_and_previewed(service):
+    client = TestClient(create_app(service))
+    assert client.get("/api/calibration/board.jpg").status_code == 404
+    entry = service.save_board_image()  # simulator default scene: birds moving past
+    by_msg = {c["msg"]: c["ok"] for c in entry["checks"]}
+    assert by_msg.get("board moved under the camera") is True, entry["checks"]
+    r = client.get("/api/calibration/board.jpg")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+
+
+def test_board_checks_flag_static_and_blank_images():
+    from ui.calibration import check_board
+    blank = np.full((400, 600), 120, np.uint8)
+    assert not check_board(blank)[1]["ok"]  # no board found
+    row = np.where((np.arange(600) // 20) % 2 == 0, 220, 30).astype(np.uint8)
+    static = np.full((400, 600), 120, np.uint8)
+    static[100:300] = row  # board in the middle of the image, but every line identical
+    checks = check_board(static)
+    assert checks[1]["ok"] and not checks[2]["ok"], checks
+
+
+def test_unsaved_settings_track_the_file(service):
+    assert service.unsaved_settings() == ["storage.data_dir"]  # the fixture moved it
+    service.save_config()
+    assert service.unsaved_settings() == []
+    service.set_camera({"exposure_us": 250})
+    assert service.status()["unsaved"] == ["camera.exposure_us"]
+    service.save_config()
+    assert service.unsaved_settings() == []
 
 
 def test_api_rejects_out_of_range_values(service):

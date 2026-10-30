@@ -1,6 +1,8 @@
 // Calibration wizard: full calibration (docs/calibration.md) and the start-of-shift check.
 // Each step says what to do, what the operator should see, and why; a status line says
-// whether the step looks OK, and the last step sums up every step's result.
+// whether the step looks OK, and the last step sums up every step's result. What a step
+// produces (PRNU, UserSet, focus value, board image) is checked by the server after it is
+// made; like every mark here, the checks only advise — nothing is blocked on them.
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -20,6 +22,19 @@ const Wizard = (() => {
   const good = (msg) => ({ state: "good", msg });
   const bad = (msg) => ({ state: "bad", msg });
   const wait = (msg) => ({ state: "wait", msg });
+  const warn = (msg) => ({ state: "warn", msg });
+
+  // server-side checks of a step's output: [{ok, msg}, ...]
+  function fromChecks(checks, okMsg) {
+    const failed = (checks || []).filter((c) => !c.ok);
+    return failed.length ? bad(failed.map((c) => c.msg).join("; ")) : good(okMsg);
+  }
+
+  function checksHtml(title, checks) {
+    if (!checks || !checks.length) return "";
+    return `<div class="wiz-label">${esc(title)}</div><ul class="wiz-summary-list">${checks.map((c) =>
+      `<li class="${c.ok ? "good" : "bad"}">${c.ok ? "✓" : "✗"} ${esc(c.msg)}</li>`).join("")}</ul>`;
+  }
 
   function simBox(scene, label) {
     if (!last.status || last.status.source !== "sim") return "";
@@ -181,7 +196,7 @@ const Wizard = (() => {
         "Check: lens defocused, conveyor stopped, white sheet in place, step 4 green.",
         "Click <b>Run PRNU</b> and confirm.",
       ],
-      see: "After a few seconds: “PRNU finished”, and the wizard moves to step 6. If the camera refuses, its reason is shown here.",
+      see: "After a few seconds: “PRNU finished”, then the wizard's own check of the result — the camera reports mode User and the white is flat (spread at most 6). If the camera refuses, its reason is shown here.",
       why: "The camera stores a gain for every pixel so the white comes out flat across the whole width.",
       controls: () => {
         const n = calib && calib.nodes;
@@ -212,12 +227,11 @@ const Wizard = (() => {
           btn.disabled = true;
           btn.textContent = "Running… (a few seconds)";
           try {
-            await ctx.api("/api/calibration/prnu", {});
-            session.prnu = true;
+            session.prnu = await ctx.api("/api/calibration/prnu", {});
             session.prnuError = null;
             ctx.toast("PRNU finished and stored in the camera");
             await ctx.refreshCalibration();
-            go(index + 1);
+            render();
           } catch (e) {
             session.prnuError = e.message;
             ctx.toast(`PRNU failed: ${e.message}`, true);
@@ -227,9 +241,9 @@ const Wizard = (() => {
           }
         };
       },
-      live: rgbGauge,
+      live: (s) => rgbGauge(s) + (session.prnu ? checksHtml("Result check", session.prnu.checks) : ""),
       fromAction: true,
-      check: () => session.prnu ? good("PRNU done")
+      check: () => session.prnu ? fromChecks(session.prnu.checks, "PRNU done, camera in User mode and the white is flat")
         : session.prnuError ? bad(`PRNU failed: ${session.prnuError}`) : wait("PRNU not run yet"),
     },
     {
@@ -239,7 +253,7 @@ const Wizard = (() => {
         "Power-cycle test: unplug the camera's network/PoE cable for 10 s, plug it back, click <b>Reconnect</b> in the top bar, and look again.",
         "If it is no longer flat after the restart: go back to step 5, run PRNU again, then click <b>Save to camera (UserSet1)</b> here so it loads at every power-up.",
       ],
-      see: "Spread along the sensor at most <b>6</b> grey levels, and a flat line in the “Profile along the sensor” chart.",
+      see: "Spread along the sensor at most <b>6</b> grey levels, and a flat line in the “Profile along the sensor” chart. After the restart the spread should be close to the value right after PRNU. If you saved to UserSet1, the wizard checks the camera now powers up with it.",
       why: "Confirms the correction works and survives a power cut.",
       controls: () => `<div class="actions">
           <button class="btn" id="wiz-record-flat">Record check</button>
@@ -252,7 +266,7 @@ const Wizard = (() => {
             "All current camera settings are saved to UserSet1, and the camera loads them at every power-up.");
           if (!ok) return;
           try {
-            await ctx.api("/api/calibration/user-set", {});
+            session.userSet = await ctx.api("/api/calibration/user-set", {});
             ctx.toast("Saved to UserSet1 and set as the power-up default");
             await ctx.refreshCalibration();
           } catch (e) {
@@ -260,8 +274,17 @@ const Wizard = (() => {
           }
         };
       },
-      live: flatGauge,
-      check: () => fromGrade(flatGrade(last.stats)),
+      live: (s) => {
+        const after = session.prnu && session.prnu.flat_after;
+        return flatGauge(s)
+          + (after ? `<div class="hint">Right after PRNU: ${fmt(after.spread)} grey levels</div>` : "")
+          + (session.userSet ? checksHtml("UserSet1 check", session.userSet.checks) : "");
+      },
+      check: () => {
+        const us = session.userSet && fromChecks(session.userSet.checks, "");
+        if (us && us.state === "bad") return bad(`UserSet1: ${us.msg}`);
+        return fromGrade(flatGrade(last.stats));
+      },
     },
     {
       title: "Focus",
@@ -286,7 +309,14 @@ const Wizard = (() => {
       },
       live: (s) => sharpGauge(s, true),
       check: () => {
-        if (session.focus) return good(`Focus recorded (${fmt(session.focus, 2)})`);
+        if (session.focus) {
+          const prev = calib && calib.focus_previous;
+          const change = prev ? session.focus / prev - 1 : 0;
+          if (Math.abs(change) > 0.25) {
+            return warn(`Focus recorded (${fmt(session.focus, 2)}), ${fmt(Math.abs(change) * 100, 0)}% ${change > 0 ? "higher" : "lower"} than the last calibration (${fmt(prev, 2)}). Expected only if the lens, lift height or camera distance changed`);
+          }
+          return good(`Focus recorded (${fmt(session.focus, 2)})${prev ? `, close to the last calibration (${fmt(prev, 2)})` : ""}`);
+        }
         const s = last.stats;
         if (!s || s.sharpness === undefined || !peakSharp) return wait("Waiting for data…");
         return s.sharpness >= 0.97 * peakSharp
@@ -300,27 +330,29 @@ const Wizard = (() => {
         "Use the official calibration board (not the stripe chart).",
         "Start it moving under the camera — on the running conveyor, or slide it slowly by hand.",
         "Click <b>Save board image</b> just as the board reaches the camera: it records the next ~0.7 s.",
-        "Open the saved file and check the whole board is in it; if not, try again.",
+        "Look at the picture that appears: the whole board should be in it. If a check is red, try again.",
       ],
-      see: "“Saved: …png” under the button.",
+      see: "The saved board image, and green checks: brightness OK, board found and not cut off, board moving.",
       why: "The board image gives the millimetres per pixel (worked out by hand for now).",
       controls: () => `<div class="actions"><button class="btn primary" id="wiz-board">Save board image</button></div>
-        <div id="wiz-board-result" class="hint"></div>`,
+        ${session.board ? `<div class="hint">Saved: <bdi>${esc(session.board.file)}</bdi></div>
+          <img class="wiz-board" alt="Saved board image" src="/api/calibration/board.jpg?t=${encodeURIComponent(session.board.time)}">
+          ${checksHtml("Image check", session.board.checks)}` : ""}`,
       mount: (card) => {
-        card.querySelector("#wiz-board").onclick = async () => {
+        card.querySelector("#wiz-board").onclick = async (ev) => {
+          ev.target.disabled = true;
           try {
-            const r = await ctx.api("/api/calibration/board", {});
-            session.board = r.file;
-            card.querySelector("#wiz-board-result").innerHTML = `Saved: <bdi>${esc(r.file)}</bdi>`;
+            session.board = await ctx.api("/api/calibration/board", {});
             await ctx.refreshCalibration();
           } catch (e) {
             ctx.toast(`Save failed: ${e.message}`, true);
           }
-          updateLive();
+          render();
         };
       },
       fromAction: true,
-      check: () => session.board ? good("Board image saved") : wait("No board image saved yet"),
+      check: () => session.board ? fromChecks(session.board.checks, "Board image saved and looks usable")
+        : wait("No board image saved yet"),
     },
     {
       title: "Finish",
@@ -329,7 +361,7 @@ const Wizard = (() => {
         "Camera tab: click <b>Save to file</b>.",
         "With birds running: check the live view — Mean 100–150 and Saturated below 1%.",
       ],
-      see: "No warning in the top bar, and the summary below all green.",
+      see: "No warning in the top bar, settings saved to file, and the summary below all green.",
       why: "Leaves the camera in its production settings. From now on a start-of-shift check is enough.",
       controls: () => `<div class="wiz-summary"></div>`,
       live: streamGauge,
@@ -338,7 +370,9 @@ const Wizard = (() => {
         if (!g) return wait("Waiting for data…");
         if (g.cls !== "good") return bad(g.msg);
         if (last.status.warning) return bad(last.status.warning);
-        return good("Camera at its working rate, no warnings");
+        const unsaved = last.status.unsaved || [];
+        if (unsaved.length) return bad(`Not saved to file: ${unsaved.join(", ")} — click Save to file in the Camera tab`);
+        return good("Camera at its working rate, no warnings, settings saved to file");
       },
       summary: true,
     },
@@ -421,20 +455,24 @@ const Wizard = (() => {
     return steps().map((s, i) => ({ i, title: s.title, r: stepResult(i) })).filter((x) => !steps()[x.i].summary);
   }
 
+  const MARK = { good: ["✓", "OK"], warn: ["!", "CHECK"], bad: ["✗", "FAIL"] };
+
   function summaryText() {
-    return summaryRows().map((x) => `${x.title} ${x.r === "good" ? "OK" : x.r === "bad" ? "FAIL" : "not checked"}`).join(", ");
+    return summaryRows().map((x) => `${x.title} ${MARK[x.r] ? MARK[x.r][1] : "not checked"}`).join(", ");
   }
 
   function summaryHtml() {
     const rows = summaryRows();
     const failed = rows.filter((x) => x.r === "bad");
-    const open = rows.filter((x) => x.r !== "good" && x.r !== "bad");
+    const open = rows.filter((x) => !MARK[x.r]);
+    const warned = rows.filter((x) => x.r === "warn");
     const head = failed.length ? verdict("bad", `${failed.length} step(s) not OK`)
       : open.length ? verdict("warn", `${open.length} step(s) not checked yet`)
-        : verdict("good", "Everything looks OK");
+        : warned.length ? verdict("warn", `OK, ${warned.length} step(s) worth a second look`)
+          : verdict("good", "Everything looks OK");
     return `<div class="wiz-label">Summary</div><div class="gauge">${head}</div>
       <ul class="wiz-summary-list">${rows.map((x) =>
-        `<li class="${x.r || ""}">${x.r === "good" ? "✓" : x.r === "bad" ? "✗" : "–"} ${x.i + 1}. ${x.title}</li>`).join("")}</ul>`;
+        `<li class="${x.r || ""}">${MARK[x.r] ? MARK[x.r][0] : "–"} ${x.i + 1}. ${x.title}</li>`).join("")}</ul>`;
   }
 
   // --- rendering ---
@@ -443,6 +481,7 @@ const Wizard = (() => {
     const next = index < steps().length - 1 ? " Click Next." : "";
     if (r.state === "good") return `<div class="wiz-status good">✓ Looks good — ${esc(r.msg)}.${next}</div>`;
     if (r.state === "bad") return `<div class="wiz-status bad">✗ Not OK — ${esc(r.msg)}</div>`;
+    if (r.state === "warn") return `<div class="wiz-status wait">! Worth a second look — ${esc(r.msg)}.${next}</div>`;
     return `<div class="wiz-status wait">… ${esc(r.msg)}</div>`;
   }
 
@@ -535,7 +574,8 @@ const Wizard = (() => {
     el.querySelectorAll("[data-step]").forEach((b) => {
       const i = Number(b.dataset.step);
       const r = stepResult(i);
-      b.className = [i === index ? "current" : "", r === "good" ? "ok" : r === "bad" ? "fail" : ""].join(" ").trim();
+      const cls = { good: "ok", bad: "fail", warn: "warn" }[r] || "";
+      b.className = [i === index ? "current" : "", cls].join(" ").trim();
     });
   }
 
