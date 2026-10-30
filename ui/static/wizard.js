@@ -1,4 +1,6 @@
 // Calibration wizard: full calibration (docs/calibration.md) and the start-of-shift check.
+// Each step says what to do, what the operator should see, and why; a status line says
+// whether the step looks OK, and the last step sums up every step's result.
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -7,124 +9,187 @@ const Wizard = (() => {
   let mode = null; // "full" | "shift"
   let index = 0;
   let calib = null; // /api/calibration
-  let peakSharp = 0;
+  let peakSharp = 0; // highest sharpness seen in the current step
   let last = { stats: null, status: null, settings: null };
-  const done = new Set();
+  let results = []; // per step: "good" | "bad" | "wait" | undefined (not visited)
+  let session = {}; // what was done in this wizard run: prnu, focus, board, shift
+  const manualDone = new Set(); // manual steps the operator ticked
 
   const fmt = (v, d = 1) => (v === null || v === undefined ? "—" : Number(v).toFixed(d));
   const verdict = (cls, text) => `<span class="verdict ${cls}">${text}</span>`;
+  const good = (msg) => ({ state: "good", msg });
+  const bad = (msg) => ({ state: "bad", msg });
+  const wait = (msg) => ({ state: "wait", msg });
 
   function simBox(scene, label) {
     if (!last.status || last.status.source !== "sim") return "";
     return `<div class="sim-box">Simulator: <button class="btn small" data-scene="${scene}">${label}</button></div>`;
   }
 
-  // --- verdicts used by both flows ---
+  // --- measurements → grade, shared by gauges and checks ---
 
-  function rgbVerdict(s) {
-    if (!s || !s.rgb_mean) return "";
-    const [r, g, b] = s.rgb_mean;
-    const all = [r, g, b];
-    const cls = all.every((v) => v >= 180 && v <= 200) && s.clip_hi < 0.1 ? "good"
-      : all.every((v) => v >= 160 && v <= 215) ? "warn" : "bad";
-    const msg = cls === "good" ? "In range" : Math.max(...all) > 200 ? "Too bright — lower exposure" : "Too dark — raise exposure";
-    return `<div class="gauge">R/G/B <b>${fmt(r, 0)} / ${fmt(g, 0)} / ${fmt(b, 0)}</b> ${verdict(cls, msg)}</div>
-            <div class="hint">Target 180–200 in every channel, no saturation (now ${fmt(s.clip_hi, 2)}%).</div>`;
-  }
-
-  function flatVerdict(s) {
-    if (!s || !s.flat) return "";
-    const f = s.flat;
-    const cls = f.spread <= 6 ? "good" : f.spread <= 12 ? "warn" : "bad";
-    const msg = cls === "good" ? "Flat" : cls === "warn" ? "Almost — check the lighting is even" : "Not flat — PRNU needed";
-    return `<div class="gauge">Spread along the sensor <b>${fmt(f.spread)}</b> grey levels
-            (${fmt(f.spread_pct)}%) ${verdict(cls, msg)}</div>
-            <div class="hint">Target: at most 6 grey levels (about ±3). The "Profile along the sensor" chart should be flat.</div>`;
-  }
-
-  function sharpVerdictVsReference(s) {
-    if (!s || s.sharpness === undefined) return "";
-    const ref = calib && calib.focus_reference;
-    if (!ref) {
-      return `<div class="gauge">Sharpness <b>${fmt(s.sharpness, 2)}</b>
-              ${verdict("warn", "No reference value — run a full calibration")}</div>`;
+  function streamGrade() {
+    const st = last.status;
+    if (!st) return null;
+    if (!(st.connected && st.grabbing)) {
+      return { cls: "bad", msg: st.connected ? "Connected, not streaming" : "Not connected" };
     }
-    const ratio = s.sharpness / ref;
-    const cls = ratio >= 0.9 ? "good" : ratio >= 0.75 ? "warn" : "bad";
-    const msg = cls === "good" ? "In focus" : "Sharpness dropped — the camera may have moved";
-    return `<div class="gauge">Sharpness <b>${fmt(s.sharpness, 2)}</b> vs reference
-            ${fmt(ref, 2)} (${fmt(ratio * 100, 0)}%) ${verdict(cls, msg)}</div>`;
+    const want = last.settings && last.settings.camera.line_rate_hz.value;
+    const got = st.line_rate_measured;
+    if (want && got && Math.abs(got - want) / want > 0.03) {
+      return { cls: "bad", msg: `Streaming at ${fmt(got, 0)} Hz instead of ${fmt(want, 0)} Hz` };
+    }
+    return { cls: "good", msg: "Connected and streaming" };
   }
 
-  // --- steps ---
+  function rgbGrade(s) {
+    if (!s || !s.rgb_mean) return null;
+    const all = s.rgb_mean;
+    if (all.every((v) => v >= 180 && v <= 200) && s.clip_hi < 0.1) return { cls: "good", msg: "In range" };
+    const cls = all.every((v) => v >= 160 && v <= 215) ? "warn" : "bad";
+    return { cls, msg: Math.max(...all) > 200 ? "Too bright — lower exposure" : "Too dark — raise exposure" };
+  }
+
+  function flatGrade(s) {
+    if (!s || !s.flat) return null;
+    const sp = s.flat.spread;
+    if (sp <= 6) return { cls: "good", msg: "Flat" };
+    return { cls: sp <= 12 ? "warn" : "bad", msg: sp <= 12 ? "Almost — check the lighting is even" : "Not flat" };
+  }
+
+  function refGrade(s) {
+    if (!s || s.sharpness === undefined) return null;
+    const ref = calib && calib.focus_reference;
+    if (!ref) return { cls: "bad", msg: "No focus reference — run a full calibration first", ratio: null };
+    const ratio = s.sharpness / ref;
+    if (ratio >= 0.9) return { cls: "good", msg: "In focus", ratio };
+    return { cls: ratio >= 0.75 ? "warn" : "bad", msg: "Sharpness dropped — the camera may have moved", ratio };
+  }
+
+  const fromGrade = (g, waitMsg = "Waiting for data…") =>
+    !g ? wait(waitMsg) : g.cls === "good" ? good(g.msg) : bad(g.msg);
+
+  // --- live gauges ---
+
+  function streamGauge() {
+    const g = streamGrade();
+    if (!g) return "";
+    return `<div class="gauge">${verdict(g.cls, g.msg)}
+            <span>Measured rate <b>${fmt(last.status.line_rate_measured, 0)}</b> Hz</span></div>`;
+  }
+
+  function rgbGauge(s) {
+    const g = rgbGrade(s);
+    if (!g) return "";
+    const [r, gg, b] = s.rgb_mean;
+    return `<div class="gauge">R/G/B <b>${fmt(r, 0)} / ${fmt(gg, 0)} / ${fmt(b, 0)}</b> ${verdict(g.cls, g.msg)}</div>
+            <div class="hint">Saturated now: ${fmt(s.clip_hi, 2)}%</div>`;
+  }
+
+  function flatGauge(s) {
+    const g = flatGrade(s);
+    if (!g) return "";
+    return `<div class="gauge">Spread along the sensor <b>${fmt(s.flat.spread)}</b> grey levels
+            (${fmt(s.flat.spread_pct)}%) ${verdict(g.cls, g.msg)}</div>`;
+  }
+
+  function sharpGauge(s, withPeak) {
+    if (!s || s.sharpness === undefined) return "";
+    return `<div class="gauge">Sharpness <b>${fmt(s.sharpness, 2)}</b>
+            ${withPeak ? `<span>highest in this step ${fmt(peakSharp, 2)}</span>` : ""}</div>`;
+  }
+
+  function refGauge(s) {
+    const g = refGrade(s);
+    if (!g) return "";
+    const ref = calib && calib.focus_reference;
+    return `<div class="gauge">Sharpness <b>${fmt(s.sharpness, 2)}</b>
+            ${ref ? `<span>reference ${fmt(ref, 2)} (${fmt(g.ratio * 100, 0)}%)</span>` : ""} ${verdict(g.cls, g.msg)}</div>`;
+  }
+
+  // --- full calibration ---
 
   const FULL = [
     {
       title: "Network",
-      body: () => `<ul>
-          <li>Camera on a static IP in <b>192.168.2.x</b> (pylon IP Configurator). Not .1 and not .255.</li>
-          <li>The PC's network adapter on the same subnet.</li>
-          <li>IP in the settings: <b>${last.settings ? esc(last.settings.camera_info.ip) : "—"}</b>.</li>
-        </ul>`,
-      live: () => {
-        const st = last.status;
-        if (!st) return "";
-        const ok = st.connected && st.grabbing;
-        return `<div class="gauge">${verdict(ok ? "good" : "bad", ok ? "Connected and streaming" : st.connected ? "Connected, not streaming" : "Not connected")}
-                <span>Measured rate <b>${fmt(st.line_rate_measured, 0)}</b> Hz</span></div>`;
-      },
+      do: [
+        "Nothing, if the status below is green.",
+        "If it is red: check the network cable and that the camera LED is on (PoE power), then click <b>Reconnect</b> in the top bar.",
+        "On site only: the camera must have an IP on the site network (<b>192.168.2.x</b>, not .1 or .255), set once in pylon IP Configurator, and the same IP in the config (now <b>${ip}</b>).",
+      ],
+      see: "“Connected and streaming”, and a measured rate close to the configured line rate.",
+      why: "Everything after this needs a live picture at the working line rate.",
+      live: streamGauge,
+      check: () => fromGrade(streamGrade()),
     },
     {
       title: "Aperture",
-      body: () => `<ul>
-          <li>The lower ring on the lens. Work at <b>f/5.6–f/8</b>; the current rig uses f/5.6.</li>
-          <li>Too open (f/4): shallow depth of field, parts of the bird go out of focus. Too closed: needs an exposure the line rate doesn't allow.</li>
-          <li><b>Don't touch the aperture after PRNU</b> — changing it invalidates the calibration.</li>
-        </ul>`,
+      do: [
+        "Find the <b>lower ring</b> on the lens — the one with f-numbers (2.8, 4, 5.6, 8…).",
+        "Set it to <b>5.6</b> and tighten its lock screw.",
+      ],
+      see: "Nothing changes in the checks. A higher f-number only makes the picture darker.",
+      why: "f/5.6–f/8 keeps the whole bird in focus while letting in enough light. Never touch this ring after PRNU (step 5) — changing it voids the calibration.",
+      check: "manual",
     },
     {
       title: "Defocus",
-      body: () => `<ol>
-          <li>Loosen the focus screw.</li>
-          <li>Turn the upper ring all the way towards infinity.</li>
-          <li>Check with the stripe chart: if the stripes disappear in the live view, the lens is defocused — which is what the white calibration needs.</li>
-        </ol>${simBox("stripes", "Show stripe chart")}`,
-      live: () => {
+      do: [
+        "Put the <b>stripe chart</b> under the camera.",
+        "Loosen the focus lock screw.",
+        "Turn the <b>upper ring</b> all the way towards infinity (∞).",
+      ],
+      see: "The stripes blur away in the live view and the sharpness number drops well below the highest value seen in this step.",
+      why: "PRNU must learn the light and sensor pattern only — not the texture of the paper.",
+      controls: () => simBox("stripes", "Show stripe chart"),
+      live: (s) => sharpGauge(s, true),
+      check: () => {
         const s = last.stats;
-        if (!s || s.sharpness === undefined) return "";
-        return `<div class="gauge">Sharpness now <b>${fmt(s.sharpness, 2)}</b></div>
-                <div class="hint">The number should drop noticeably as the stripes blur.</div>`;
+        if (!s || s.sharpness === undefined || !peakSharp) return wait("Waiting for data…");
+        return s.sharpness <= 0.5 * peakSharp
+          ? good(`Defocused (sharpness at ${fmt((s.sharpness / peakSharp) * 100, 0)}% of the highest)`)
+          : wait("Still sharp — keep turning the upper ring towards ∞");
       },
     },
     {
       title: "White sheet & exposure",
-      body: () => `<ol>
-          <li>Conveyor <b>stopped</b>. A clean white sheet (no creases or marks) under the camera.</li>
-          <li>Lower the lift to <b>0</b> in the technician app so the light on the sheet is even.</li>
-          <li>Adjust exposure until every channel reads <b>180–200</b> (about 270 µs on the reference rig).</li>
-        </ol>
-        <div class="slider-row">
+      do: [
+        "Stop the conveyor.",
+        "Replace the stripe chart with a clean <b>white sheet</b> (no creases or marks).",
+        "Lower the lift to <b>0</b> in the technician app.",
+        "Change the exposure below and click <b>Apply</b> until the status turns green. If it stays too dark at the maximum, lower the line rate in the Camera tab for now (e.g. 1500 Hz) — you restore it in step 9.",
+      ],
+      see: "R, G and B all between <b>180 and 200</b>, nothing saturated.",
+      why: "PRNU needs a bright, even, unsaturated white to measure each pixel's response.",
+      controls: () => `<div class="slider-row">
           <label>Exposure (µs)</label>
           <input type="number" id="wiz-exposure" step="1" style="width:110px">
           <button class="btn small" id="wiz-exposure-apply">Apply</button>
+          <span class="hint">max ${last.settings ? fmt(last.settings.derived.exposure_max_us, 0) : "—"}</span>
         </div>${simBox("white", "Show white sheet")}`,
       mount: (card) => {
         const input = card.querySelector("#wiz-exposure");
         if (last.settings) input.value = Math.round(last.settings.camera.exposure_us.value || 0);
         card.querySelector("#wiz-exposure-apply").onclick = () => ctx.setExposure(Number(input.value));
       },
-      live: () => rgbVerdict(last.stats),
+      live: rgbGauge,
+      check: () => fromGrade(rgbGrade(last.stats)),
     },
     {
       title: "Run PRNU",
-      body: () => {
+      do: [
+        "Check: lens defocused, conveyor stopped, white sheet in place, step 4 green.",
+        "Click <b>Run PRNU</b> and confirm.",
+      ],
+      see: "After a few seconds: “PRNU finished”, and the wizard moves to step 6. If the camera refuses, its reason is shown here.",
+      why: "The camera stores a gain for every pixel so the white comes out flat across the whole width.",
+      controls: () => {
         const n = calib && calib.nodes;
         const missing = calib ? calib.missing_prnu : [];
         if (!n || missing.length) {
           return `<p>${verdict("bad", "No shading-correction nodes found on the camera")}</p>
-                  <p class="hint">Missing: ${esc(missing.join(", "))}. You can run it manually in pylon Viewer:
-                  Image Processing Control → Color Space = Off, Light Source Preset = Off →
-                  Shading Correction Selector = PRNU → User → Execute.</p>`;
+                  <p class="hint">Missing: ${esc(missing.join(", "))}. Run it manually in pylon Viewer:
+                  Color Space = Off, Light Source Preset = Off → Shading Correction Selector = PRNU → User → Execute.</p>`;
         }
         const rows = [
           n.color_space && `${n.color_space} = Off`,
@@ -133,8 +198,7 @@ const Wizard = (() => {
           `${n.shading_mode} = User`,
           `${n.shading_create}()  ← execute`,
         ].filter(Boolean).map(esc);
-        return `<p>The camera learns the flatness pattern from the white sheet and stores it in its own memory. Before clicking, make sure:
-                  defocused, conveyor stopped, white sheet, channels at 180–200.</p>
+        return `<div class="hint">The camera settings this will change:</div>
                 <div class="note nodes">${rows.join("<br>")}</div>
                 <div class="actions"><button class="btn danger" id="wiz-prnu">Run PRNU</button></div>`;
       },
@@ -149,26 +213,35 @@ const Wizard = (() => {
           btn.textContent = "Running… (a few seconds)";
           try {
             await ctx.api("/api/calibration/prnu", {});
+            session.prnu = true;
+            session.prnuError = null;
             ctx.toast("PRNU finished and stored in the camera");
-            done.add(index);
             await ctx.refreshCalibration();
             go(index + 1);
           } catch (e) {
+            session.prnuError = e.message;
             ctx.toast(`PRNU failed: ${e.message}`, true);
             btn.disabled = false;
             btn.textContent = "Run PRNU";
+            updateLive();
           }
         };
       },
-      live: () => rgbVerdict(last.stats),
+      live: rgbGauge,
+      fromAction: true,
+      check: () => session.prnu ? good("PRNU done")
+        : session.prnuError ? bad(`PRNU failed: ${session.prnuError}`) : wait("PRNU not run yet"),
     },
     {
       title: "Verify flatness",
-      body: () => `<ol>
-          <li>The white sheet should look flat along the whole sensor.</li>
-          <li><b>Power-cycle check:</b> switch the camera off and on, click "Reconnect" and check again. If the flatness is gone, save to the camera (UserSet1) so it loads at power-up.</li>
-        </ol>
-        <div class="actions">
+      do: [
+        "Keep the white sheet in place and check the status below is green. Click <b>Record check</b>.",
+        "Power-cycle test: unplug the camera's network/PoE cable for 10 s, plug it back, click <b>Reconnect</b> in the top bar, and look again.",
+        "If it is no longer flat after the restart: go back to step 5, run PRNU again, then click <b>Save to camera (UserSet1)</b> here so it loads at every power-up.",
+      ],
+      see: "Spread along the sensor at most <b>6</b> grey levels, and a flat line in the “Profile along the sensor” chart.",
+      why: "Confirms the correction works and survives a power cut.",
+      controls: () => `<div class="actions">
           <button class="btn" id="wiz-record-flat">Record check</button>
           <button class="btn danger" id="wiz-user-set">Save to camera (UserSet1)</button>
         </div>${simBox("white", "Show white sheet")}`,
@@ -187,92 +260,138 @@ const Wizard = (() => {
           }
         };
       },
-      live: () => flatVerdict(last.stats),
+      live: flatGauge,
+      check: () => fromGrade(flatGrade(last.stats)),
     },
     {
       title: "Focus",
-      body: () => `<ol>
-          <li>Stripe chart under the camera, <b>stripes across</b> the sensor line.</li>
-          <li>Raise the lift to the working height, <b>33</b>.</li>
-          <li>If the image is dark, raise exposure. At 3000 Hz exposure is capped at 333 µs; if you lower the line rate temporarily, <b>restore it afterwards</b>.</li>
-          <li>Turn the upper ring until sharpness peaks. Go past the peak and come back to it.</li>
-          <li>Lock the screw and click "Record focus value" — this is the reference for shift checks.</li>
-        </ol>
-        <div class="actions">
+      do: [
+        "Replace the white sheet with the <b>stripe chart</b>, stripes crossing the camera's long axis.",
+        "Raise the lift to the working height, <b>33</b>.",
+        "Turn the <b>upper ring</b> slowly until the status says “at peak”. Go a little past it and come back.",
+        "Tighten the focus lock screw and click <b>Record focus value</b>.",
+      ],
+      see: "The sharpness number climbs to a maximum, then “✓ Focus recorded”. If the picture is too dark, raise exposure (up to the maximum).",
+      why: "The recorded value is the reference the shift check compares against.",
+      controls: () => `<div class="actions">
           <button class="btn small" id="wiz-peak-reset">Reset peak</button>
           <button class="btn primary" id="wiz-record-focus">Record focus value</button>
         </div>${simBox("stripes", "Show stripe chart")}`,
       mount: (card) => {
-        peakSharp = 0;
         card.querySelector("#wiz-peak-reset").onclick = () => { peakSharp = 0; };
-        card.querySelector("#wiz-record-focus").onclick = () => record("focus", "focus locked");
+        card.querySelector("#wiz-record-focus").onclick = async () => {
+          if (await record("focus", "focus locked")) session.focus = last.stats && last.stats.sharpness;
+          updateLive();
+        };
       },
-      live: () => {
+      live: (s) => sharpGauge(s, true),
+      check: () => {
+        if (session.focus) return good(`Focus recorded (${fmt(session.focus, 2)})`);
         const s = last.stats;
-        if (!s || s.sharpness === undefined) return "";
-        peakSharp = Math.max(peakSharp, s.sharpness);
-        const ratio = peakSharp ? s.sharpness / peakSharp : 0;
-        const cls = ratio >= 0.97 ? "good" : ratio >= 0.85 ? "warn" : "bad";
-        return `<div class="gauge">Sharpness <b>${fmt(s.sharpness, 2)}</b>
-                peak ${fmt(peakSharp, 2)} ${verdict(cls, cls === "good" ? "At peak" : "Away from peak")}</div>`;
+        if (!s || s.sharpness === undefined || !peakSharp) return wait("Waiting for data…");
+        return s.sharpness >= 0.97 * peakSharp
+          ? wait("At peak — lock the screw and click Record focus value")
+          : wait(`Not at peak (${fmt((s.sharpness / peakSharp) * 100, 0)}% of the highest) — keep turning`);
       },
     },
     {
       title: "Calibration board",
-      body: () => `<ol>
-          <li>The official board (not the stripe chart).</li>
-          <li>Put it on the moving conveyor, or move it slowly under the camera — a line scanner needs motion to build a 2-D image.</li>
-          <li>Click "Save board image": 2048 full-resolution lines are saved (PNG). The mm-per-pixel calculation is manual for now.</li>
-        </ol>
-        <div class="actions"><button class="btn primary" id="wiz-board">Save board image</button></div>
+      do: [
+        "Use the official calibration board (not the stripe chart).",
+        "Start it moving under the camera — on the running conveyor, or slide it slowly by hand.",
+        "Click <b>Save board image</b> just as the board reaches the camera: it records the next ~0.7 s.",
+        "Open the saved file and check the whole board is in it; if not, try again.",
+      ],
+      see: "“Saved: …png” under the button.",
+      why: "The board image gives the millimetres per pixel (worked out by hand for now).",
+      controls: () => `<div class="actions"><button class="btn primary" id="wiz-board">Save board image</button></div>
         <div id="wiz-board-result" class="hint"></div>`,
       mount: (card) => {
         card.querySelector("#wiz-board").onclick = async () => {
           try {
             const r = await ctx.api("/api/calibration/board", {});
+            session.board = r.file;
             card.querySelector("#wiz-board-result").innerHTML = `Saved: <bdi>${esc(r.file)}</bdi>`;
             await ctx.refreshCalibration();
           } catch (e) {
             ctx.toast(`Save failed: ${e.message}`, true);
           }
+          updateLive();
         };
       },
+      fromAction: true,
+      check: () => session.board ? good("Board image saved") : wait("No board image saved yet"),
     },
     {
       title: "Finish",
-      body: () => `<ul>
-          <li>Back to the working line rate (3000 Hz) with exposure at the ceiling (about 330 µs).</li>
-          <li>With birds on the line: mean 100–150, saturation below 1% (see the histogram).</li>
-          <li>Save the settings to file: "Camera" tab → "Save to file".</li>
-          <li>From now on a "Shift check" at the start of each shift is enough.</li>
-        </ul>`,
+      do: [
+        "Camera tab: line rate back to the working value (3000 Hz) if you changed it, exposure at the maximum (about 330 µs).",
+        "Camera tab: click <b>Save to file</b>.",
+        "With birds running: check the live view — Mean 100–150 and Saturated below 1%.",
+      ],
+      see: "No warning in the top bar, and the summary below all green.",
+      why: "Leaves the camera in its production settings. From now on a start-of-shift check is enough.",
+      controls: () => `<div class="wiz-summary"></div>`,
+      live: streamGauge,
+      check: () => {
+        const g = streamGrade();
+        if (!g) return wait("Waiting for data…");
+        if (g.cls !== "good") return bad(g.msg);
+        if (last.status.warning) return bad(last.status.warning);
+        return good("Camera at its working rate, no warnings");
+      },
+      summary: true,
     },
   ];
+
+  // --- start-of-shift check ---
 
   const SHIFT = [
     {
       title: "White sheet",
-      body: () => `<p>White sheet under the camera, conveyor stopped. The profile should be flat, with no vertical stripes. If not — run a full calibration again (PRNU step).</p>${simBox("white", "Show white sheet")}`,
-      live: () => flatVerdict(last.stats),
+      do: ["Stop the conveyor and put the white sheet under the camera."],
+      see: "Spread along the sensor at most 6 grey levels, no vertical stripes in the live view.",
+      why: "Shows the PRNU correction is still valid. If not: run a full calibration from step 3.",
+      controls: () => simBox("white", "Show white sheet"),
+      live: flatGauge,
+      check: () => fromGrade(flatGrade(last.stats)),
     },
     {
       title: "Focus",
-      body: () => `<p>Stripe chart under the camera at working height. Sharpness should be close to the value recorded at calibration.</p>${simBox("stripes", "Show stripe chart")}`,
-      live: () => sharpVerdictVsReference(last.stats),
+      do: ["Put the stripe chart under the camera at the working height (lift at 33)."],
+      see: "Sharpness at least 90% of the value recorded at calibration.",
+      why: "A drop means the camera or the lift moved. If so: full calibration, step 7.",
+      controls: () => simBox("stripes", "Show stripe chart"),
+      live: refGauge,
+      check: () => fromGrade(refGrade(last.stats)),
     },
     {
-      title: "Horizontal stripes",
-      body: () => `<p>Empty conveyor running, lights on. The live view should show no stripes across time (flicker). If there are, it's a lighting problem, not software.</p>${simBox("birds", "Show running line")}`,
+      title: "Flicker",
+      do: ["Remove the chart, run the conveyor empty with the lights on, and watch the live view for about 10 seconds."],
+      see: "No bright or dark bands across the full height of the live view.",
+      why: "Bands mean the lights flicker — a lighting/power problem, not software.",
+      controls: () => simBox("birds", "Show running line"),
+      check: "manual",
     },
     {
       title: "Record",
-      body: () => `<p>Record the check result in the log, with the current values.</p>
+      do: ["Add a note if anything was off, then click <b>Record shift check</b>."],
+      see: "“Recorded in the log” and a new line in the Calibration log below.",
+      why: "Keeps a dated record of each shift's check, with the measured values.",
+      controls: () => `<div class="wiz-summary"></div>
         <label class="field">Note <input type="text" id="wiz-shift-note" placeholder="e.g. all OK"></label>
         <div class="actions"><button class="btn primary" id="wiz-shift-record">Record shift check</button></div>`,
       mount: (card) => {
-        card.querySelector("#wiz-shift-record").onclick = () =>
-          record("shift_check", card.querySelector("#wiz-shift-note").value);
+        card.querySelector("#wiz-shift-record").onclick = async () => {
+          const note = card.querySelector("#wiz-shift-note").value.trim();
+          const sum = summaryText();
+          if (await record("shift_check", note ? `${note} · ${sum}` : sum)) session.shift = true;
+          updateLive();
+        };
       },
+      fromAction: true,
+      check: () => session.shift ? good("Recorded") : wait("Not recorded yet"),
+      summary: true,
     },
   ];
 
@@ -280,14 +399,52 @@ const Wizard = (() => {
     try {
       await ctx.api("/api/calibration/record", { kind, note });
       ctx.toast("Recorded in the log");
-      done.add(index);
       await ctx.refreshCalibration();
+      return true;
     } catch (e) {
       ctx.toast(`Recording failed: ${e.message}`, true);
+      return false;
     }
   }
 
   function steps() { return mode === "shift" ? SHIFT : FULL; }
+
+  // --- results ---
+
+  function stepResult(i) {
+    const step = steps()[i];
+    if (step.check === "manual") return manualDone.has(i) ? "good" : results[i];
+    return results[i];
+  }
+
+  function summaryRows() {
+    return steps().map((s, i) => ({ i, title: s.title, r: stepResult(i) })).filter((x) => !steps()[x.i].summary);
+  }
+
+  function summaryText() {
+    return summaryRows().map((x) => `${x.title} ${x.r === "good" ? "OK" : x.r === "bad" ? "FAIL" : "not checked"}`).join(", ");
+  }
+
+  function summaryHtml() {
+    const rows = summaryRows();
+    const failed = rows.filter((x) => x.r === "bad");
+    const open = rows.filter((x) => x.r !== "good" && x.r !== "bad");
+    const head = failed.length ? verdict("bad", `${failed.length} step(s) not OK`)
+      : open.length ? verdict("warn", `${open.length} step(s) not checked yet`)
+        : verdict("good", "Everything looks OK");
+    return `<div class="wiz-label">Summary</div><div class="gauge">${head}</div>
+      <ul class="wiz-summary-list">${rows.map((x) =>
+        `<li class="${x.r || ""}">${x.r === "good" ? "✓" : x.r === "bad" ? "✗" : "–"} ${x.i + 1}. ${x.title}</li>`).join("")}</ul>`;
+  }
+
+  // --- rendering ---
+
+  function statusHtml(r) {
+    const next = index < steps().length - 1 ? " Click Next." : "";
+    if (r.state === "good") return `<div class="wiz-status good">✓ Looks good — ${esc(r.msg)}.${next}</div>`;
+    if (r.state === "bad") return `<div class="wiz-status bad">✗ Not OK — ${esc(r.msg)}</div>`;
+    return `<div class="wiz-status wait">… ${esc(r.msg)}</div>`;
+  }
 
   function render() {
     if (!mode) {
@@ -297,30 +454,53 @@ const Wizard = (() => {
           <button class="btn" data-mode="full">Full calibration</button>
         </div>
         <p class="hint">Full calibration is done at installation, and again when the lights move, the aperture or distance changes, or vertical stripes appear.</p>`;
-      el.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { mode = b.dataset.mode; go(0); }));
+      el.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => {
+        mode = b.dataset.mode;
+        results = [];
+        session = {};
+        manualDone.clear();
+        go(0);
+      }));
       return;
     }
     const list = steps();
     const step = list[index];
+    const ip = last.settings ? esc(last.settings.camera_info.ip) : "—";
+    const doItems = step.do.map((d) => d.replace("${ip}", ip));
     el.innerHTML = `
       <div class="wiz-mode">
         <button class="btn small" id="wiz-back-mode">← ${mode === "full" ? "Full calibration" : "Shift check"}</button>
       </div>
-      <div class="wiz-steps">${list.map((s, i) =>
-        `<button data-step="${i}" class="${i === index ? "current" : done.has(i) ? "done" : ""}">${i + 1}. ${s.title}</button>`).join("")}</div>
+      <div class="wiz-steps">${list.map((s, i) => `<button data-step="${i}">${i + 1}. ${s.title}</button>`).join("")}</div>
       <div class="wiz-card">
         <h4>${index + 1}. ${step.title}</h4>
-        ${step.body()}
+        <div class="wiz-label">Do</div>
+        <ol>${doItems.map((d) => `<li>${d}</li>`).join("")}</ol>
+        ${step.controls ? step.controls() : ""}
+        <div class="wiz-label">You should see</div>
+        <p class="wiz-see">${step.see}</p>
         <div class="wiz-live"></div>
+        ${step.check === "manual"
+          ? `<label class="check wiz-manual"><input type="checkbox" id="wiz-manual" ${manualDone.has(index) ? "checked" : ""}>
+             Done — I checked this by hand</label>`
+          : `<div class="wiz-status-box"></div>`}
+        <p class="wiz-why"><b>Why:</b> ${step.why}</p>
         <div class="actions">
           <button class="btn" id="wiz-prev" ${index === 0 ? "disabled" : ""}>Back</button>
           <button class="btn primary" id="wiz-next" ${index === list.length - 1 ? "disabled" : ""}>Next</button>
         </div>
       </div>`;
-    el.querySelector("#wiz-back-mode").onclick = () => { mode = null; done.clear(); render(); };
+    el.querySelector("#wiz-back-mode").onclick = () => { mode = null; render(); };
     el.querySelectorAll("[data-step]").forEach((b) => (b.onclick = () => go(Number(b.dataset.step))));
     el.querySelector("#wiz-prev").onclick = () => go(index - 1);
-    el.querySelector("#wiz-next").onclick = () => { done.add(index); go(index + 1); };
+    el.querySelector("#wiz-next").onclick = () => go(index + 1);
+    const manual = el.querySelector("#wiz-manual");
+    if (manual) {
+      manual.onchange = () => {
+        if (manual.checked) manualDone.add(index); else manualDone.delete(index);
+        updateLive();
+      };
+    }
     el.querySelectorAll("[data-scene]").forEach((b) => (b.onclick = () => ctx.setScene(b.dataset.scene)));
     if (step.mount) step.mount(el.querySelector(".wiz-card"));
     updateLive();
@@ -328,14 +508,35 @@ const Wizard = (() => {
 
   function go(i) {
     index = Math.max(0, Math.min(i, steps().length - 1));
+    peakSharp = 0;
     render();
   }
 
   function updateLive() {
     if (!mode || !el) return;
     const step = steps()[index];
-    const box = el.querySelector(".wiz-live");
-    if (box && step.live) box.innerHTML = step.live();
+    const s = last.stats;
+    if (s && s.sharpness !== undefined) peakSharp = Math.max(peakSharp, s.sharpness);
+    const live = el.querySelector(".wiz-live");
+    if (live) live.innerHTML = step.live ? step.live(s) : "";
+    // steps judged by an action done in this run (PRNU, recorded focus, …) stay current even
+    // when the operator is elsewhere; measurement steps keep the result from their last visit
+    steps().forEach((st, i) => {
+      if (st.fromAction) results[i] = st.check().state;
+    });
+    if (step.check !== "manual") {
+      const r = step.check();
+      results[index] = r.state;
+      const box = el.querySelector(".wiz-status-box");
+      if (box) box.innerHTML = statusHtml(r);
+    }
+    const sum = el.querySelector(".wiz-summary");
+    if (sum) sum.innerHTML = summaryHtml();
+    el.querySelectorAll("[data-step]").forEach((b) => {
+      const i = Number(b.dataset.step);
+      const r = stepResult(i);
+      b.className = [i === index ? "current" : "", r === "good" ? "ok" : r === "bad" ? "fail" : ""].join(" ").trim();
+    });
   }
 
   return {
@@ -345,6 +546,10 @@ const Wizard = (() => {
       calib = c;
       if (mode && JSON.stringify(c.nodes) !== before) render();
     },
-    update(data) { Object.assign(last, data); updateLive(); },
+    update(data) {
+      const settingsArrived = data.settings && !last.settings;
+      Object.assign(last, data);
+      if (settingsArrived && mode) render(); else updateLive();
+    },
   };
 })();

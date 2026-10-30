@@ -124,8 +124,24 @@ b.good { color: var(--ok); } b.warn { color: var(--warn); } b.bad { color: var(-
   background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
   border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer;
 }
+.wiz-steps button.ok { color: var(--ok); border-color: #2a6b45; }
+.wiz-steps button.fail { color: var(--bad); border-color: #6b2a2a; }
 .wiz-steps button.current { color: var(--text); border-color: var(--accent); }
-.wiz-steps button.done { color: var(--ok); border-color: #2a6b45; }
+.wiz-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--accent); margin: 12px 0 2px;
+}
+.wiz-see { margin: 4px 0; }
+.wiz-why { font-size: 13px; color: var(--muted); margin: 12px 0 0; }
+.wiz-status { padding: 8px 10px; border-radius: 6px; font-weight: 600; margin: 10px 0 0; }
+.wiz-status.good { background: #143a25; color: var(--ok); }
+.wiz-status.bad { background: #3a1616; color: var(--bad); }
+.wiz-status.wait { background: #3d3115; color: var(--warn); }
+.wiz-manual { margin: 10px 0 0; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; }
+.wiz-summary-list { list-style: none; padding: 0; margin: 4px 0 8px; font-size: 14px; }
+.wiz-summary-list li { color: var(--muted); }
+.wiz-summary-list li.good { color: var(--ok); }
+.wiz-summary-list li.bad { color: var(--bad); }
 .wiz-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .wiz-card h4 { margin: 0 0 8px; font-size: 16px; }
 .wiz-card ol, .wiz-card ul { padding-inline-start: 20px; margin: 6px 0; }
