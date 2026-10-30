@@ -13,9 +13,19 @@ STATIC = Path(__file__).resolve().parent / "static"
 NO_CACHE = {"Cache-Control": "no-store"}
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    """Make the browser recheck JS/CSS on every load (cheap 304 via ETag), so an updated UI
+    is never mixed with stale scripts from the browser's heuristic cache."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(service: CameraService) -> FastAPI:
     app = FastAPI(title="Milof acquisition station", docs_url="/api/docs", redoc_url=None)
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    app.mount("/static", RevalidatedStaticFiles(directory=STATIC), name="static")
 
     @app.exception_handler(UserError)
     async def user_error(_, exc: UserError):

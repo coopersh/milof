@@ -82,6 +82,12 @@ def test_api_rejects_out_of_range_values(service):
     assert client.get("/api/status").json()["source"] == "sim"
 
 
+def test_static_files_are_revalidated(service):
+    client = TestClient(create_app(service))
+    r = client.get("/static/wizard.js")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+
+
 def test_warns_when_exposure_caps_line_rate(service):
     rate = service.cfg.camera.line_rate_hz
     service.set_camera({"exposure_us": 0.9e6 / rate})
