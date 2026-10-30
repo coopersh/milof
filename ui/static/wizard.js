@@ -143,7 +143,7 @@ const Wizard = (() => {
         "Find the <b>lower ring</b> on the lens — the one with f-numbers (2.8, 4, 5.6, 8…).",
         "Set it to <b>5.6</b> and tighten its lock screw.",
       ],
-      see: "The live view gets darker as the number goes up, and the brightness below drops — that is expected; step 4 brings it back with exposure. The wizard cannot read the ring, so tick the box when it is set.",
+      see: "The live view gets darker as the number goes up, and the brightness below drops.",
       why: "f/5.6–f/8 keeps the whole bird in focus while letting in enough light. Never touch this ring after PRNU (step 5) — changing it voids the calibration.",
       live: (s) => !s ? "" : `<div class="gauge">Brightness (mean) <b>${fmt(s.mean, 0)}</b>
         <span>R/G/B ${fmt(s.rgb_mean[0], 0)} / ${fmt(s.rgb_mean[1], 0)} / ${fmt(s.rgb_mean[2], 0)}</span></div>
@@ -524,7 +524,7 @@ const Wizard = (() => {
         <div class="wiz-live"></div>
         ${step.check === "manual"
           ? `<label class="check wiz-manual"><input type="checkbox" id="wiz-manual" ${manualDone.has(index) ? "checked" : ""}>
-             Done — I checked this by hand</label>`
+             Done</label>`
           : `<div class="wiz-status-box"></div>`}
         <p class="wiz-why"><b>Why:</b> ${step.why}</p>
         <div class="actions">
