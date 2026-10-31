@@ -63,9 +63,11 @@ target.
 1. **Defocus.** Loosen the focus screw and turn the upper (focus) ring all the way to
    infinity. Check with the stripe chart: stripes visible → still in focus; stripes
    gone → good. Defocus keeps paper texture out of the correction.
-2. Belt **stopped**. White sheet under the camera, lit as evenly as possible. Lower
-   the camera/lift as far as possible (lift to **0** in the technician app) so the
-   light on the sheet is uniform.
+2. Line **stopped**. White sheet flat on a rigid board, held **where the birds pass**:
+   in the light, square to the camera, covering the whole field, still. Not against
+   the lens — the light bars only converge on the scan line at the birds' distance
+   (`docs/hardware_setup.md`, *Light stripe*), and PRNU must learn the light as the
+   birds see it.
 3. Stream and set exposure so the white reads **R, G, B ≈ 180–200** — bright but not
    clipped (on the reference rig: ~270 µs).
 4. Image Processing Control: **Color Space = Off**, **Light Source Preset = Off**.
@@ -80,13 +82,12 @@ target.
 
 ## 5. Focus (upper ring)
 
-1. Stripe (focus) chart under the camera, stripes **across** the sensor line (so the
-   line crosses many stripes).
-2. Raise the lift to working height **33**.
-3. Raise exposure if the chart is dark (~800 µs is fine for a static chart).
-4. Stream, one hand on the focus ring, turn until the stripes are sharpest
+1. Stripe (focus) chart in the same place, where the birds pass, stripes **across**
+   the sensor line (so the line crosses many stripes).
+2. Raise exposure if the chart is dark (~800 µs is fine for a static chart).
+3. Stream, one hand on the focus ring, turn until the stripes are sharpest
    (UI: maximise the *sharpness* number — go past the peak and come back).
-5. **Lock the screw.** Don't touch it again.
+4. **Lock the screw.** Don't touch it again.
 
 ## 6. Calibration board
 

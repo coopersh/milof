@@ -173,8 +173,8 @@ const Wizard = (() => {
       title: "White sheet & exposure",
       do: [
         "Stop the conveyor.",
-        "Replace the stripe chart with a clean <b>white sheet</b> (no creases or marks).",
-        "Lower the lift to <b>0</b> in the technician app.",
+        "Replace the stripe chart with a clean <b>white sheet</b> (no creases or marks), flat on a rigid board.",
+        "Hold it <b>where the birds pass</b> — in the light, square to the camera, covering the whole width — and keep it still. Not against the lens: the lights only meet at the birds' distance.",
         "Change the exposure below and click <b>Apply</b> until the status turns green. If it stays too dark at the maximum, lower the line rate in the Camera tab for now (e.g. 1500 Hz) — you restore it in step 9.",
       ],
       see: "R, G and B all between <b>180 and 200</b>, nothing saturated.",
@@ -292,8 +292,7 @@ const Wizard = (() => {
     {
       title: "Focus",
       do: [
-        "Replace the white sheet with the <b>stripe chart</b>, stripes crossing the camera's long axis.",
-        "Raise the lift to the working height, <b>33</b>.",
+        "Replace the white sheet with the <b>stripe chart</b> in the same place (where the birds pass), stripes crossing the camera's long axis.",
         "Turn the <b>upper ring</b> slowly until the status says “at peak”. Go a little past it and come back.",
         "Tighten the focus lock screw and click <b>Record focus value</b>.",
       ],
@@ -316,7 +315,7 @@ const Wizard = (() => {
           const prev = calib && calib.focus_previous;
           const change = prev ? session.focus / prev - 1 : 0;
           if (Math.abs(change) > 0.25) {
-            return warn(`Focus recorded (${fmt(session.focus, 2)}), ${fmt(Math.abs(change) * 100, 0)}% ${change > 0 ? "higher" : "lower"} than the last calibration (${fmt(prev, 2)}). Expected only if the lens, lift height or camera distance changed`);
+            return warn(`Focus recorded (${fmt(session.focus, 2)}), ${fmt(Math.abs(change) * 100, 0)}% ${change > 0 ? "higher" : "lower"} than the last calibration (${fmt(prev, 2)}). Expected only if the lens or the camera distance changed`);
           }
           return good(`Focus recorded (${fmt(session.focus, 2)})${prev ? `, close to the last calibration (${fmt(prev, 2)})` : ""}`);
         }
@@ -395,9 +394,9 @@ const Wizard = (() => {
     },
     {
       title: "Focus",
-      do: ["Put the stripe chart under the camera at the working height (lift at 33)."],
+      do: ["Hold the stripe chart where the birds pass, in the same place as at calibration."],
       see: "Sharpness at least 90% of the value recorded at calibration.",
-      why: "A drop means the camera or the lift moved. If so: full calibration, step 7.",
+      why: "A drop means the camera moved, or the chart is not where the birds pass. If the camera moved: full calibration, step 7.",
       controls: () => simBox("stripes", "Show stripe chart"),
       live: refGauge,
       check: () => fromGrade(refGrade(last.stats)),
