@@ -37,6 +37,7 @@ PREVIEW_LINES = 4096  # rolling preview, ~1.4 s at 3 kHz
 PREVIEW_STEP = 4  # the preview keeps every 4th sensor pixel
 RECENT = 12  # thumbnails of the last saved images
 BOARD_LINES = 2048  # lines in a saved calibration-board image
+STALL_S = 3.0  # no good block for this long while grabbing = stream stuck; restart it
 
 # config field → (camera node, type, may change during a capture run)
 CAMERA_FIELDS: dict[str, tuple[str, type, bool]] = {
@@ -147,7 +148,11 @@ class CameraService:
         self.blocks = 0
         self.lost_frames = 0
         self.timeouts = 0
+        self.stream_restarts = 0
+        self.stall_s = STALL_S
         self.last_capture: dict | None = None
+        self._last_good = time.monotonic()  # last good block, or when grabbing (re)started
+        self._stalls = 0  # recoveries since the last good block
 
         self._cmds: queue.Queue = queue.Queue()
         self._stop = threading.Event()
@@ -193,10 +198,16 @@ class CameraService:
     def _run(self) -> None:
         self._connect()
         while not self._stop.is_set():
+            busy = time.monotonic()
             self._drain()
+            self._last_good += time.monotonic() - busy  # a long command is not a stall
             self.grabbing = self.cam.grabbing
             if not self.grabbing:
+                self._last_good = time.monotonic()
                 time.sleep(0.05)
+                continue
+            if time.monotonic() - self._last_good > self.stall_s:
+                self._recover()
                 continue
             try:
                 block = self.cam.retrieve(self.cam.timeout_ms())
@@ -214,6 +225,29 @@ class CameraService:
             self.cam.close()
         except Exception:  # noqa: BLE001
             log.exception("closing the camera failed")
+
+    def _recover(self) -> None:
+        """The camera can stay "grabbing" yet deliver nothing after a burst of network
+        errors (seen at link-up on the USB NIC). Restart the grab; if that did not help,
+        reopen the camera. Lost time shows up as a jump in line index, not a silent stop."""
+        self._stalls += 1
+        self.stream_restarts += 1
+        idle = time.monotonic() - self._last_good
+        try:
+            if self._stalls == 1:
+                log.warning("no image for %.1f s — restarting the grab", idle)
+                self.cam.stop()
+                self.cam.start()
+            else:
+                log.warning("still no image after a grab restart — reopening the camera")
+                try:
+                    self.cam.close()
+                except Exception:  # noqa: BLE001
+                    log.exception("close before reopen failed")
+                self._connect()
+        except Exception:  # noqa: BLE001 — leave it to the next stall check / the operator
+            log.exception("stream recovery failed")
+        self._last_good = time.monotonic()
 
     def _drain(self) -> None:
         while True:
@@ -249,6 +283,7 @@ class CameraService:
                 except Exception:  # noqa: BLE001
                     pass
             self.device = " ".join(parts) or self.cfg.camera.model
+        self._last_good = time.monotonic()
         try:
             self.nodes = calibration.discover(self.cam)
         except Exception:  # noqa: BLE001 — the wizard reports missing nodes
@@ -271,6 +306,8 @@ class CameraService:
     def _on_block(self, block: Block) -> None:
         lines = block.lines
         self.blocks += 1
+        self._last_good = time.monotonic()
+        self._stalls = 0
         self.lost_frames += block.lost_frames
         self._arrivals.append((time.monotonic(), lines.shape[0]))
         small = lines[:, ::PREVIEW_STEP]
@@ -437,6 +474,7 @@ class CameraService:
             "blocks": self.blocks,
             "lost_frames": self.lost_frames,
             "timeouts": self.timeouts,
+            "stream_restarts": self.stream_restarts,
             "line_rate_measured": self._measured_rate(),
             "show_cuts": self._show_cuts,
             "last_cut": self._cuts[-1] if self._cuts else None,

@@ -55,6 +55,22 @@ def test_capture_writes_one_image_per_cut(service, tmp_path):
     assert service.recent() and service.recent_jpeg(service.recent()[-1]["seq"])
 
 
+@pytest.mark.parametrize("stall, restarts", [("grab", 1), ("device", 2)])
+def test_stalled_stream_recovers_by_itself(service, stall, restarts):
+    service.stall_s = 0.5
+    service.cam.stall = stall  # "grabbing" but nothing arrives
+    blocks = service.blocks
+    wait_for(lambda: service.stream_restarts == restarts and service.blocks > blocks + 5)
+    assert service.status()["connected"] and service.status()["grabbing"]
+
+
+def test_long_command_is_not_a_stall(service):
+    service.stall_s = 0.5
+    service.call(lambda: time.sleep(1.0))  # e.g. PRNU blocks the camera thread
+    time.sleep(0.3)
+    assert service.stream_restarts == 0
+
+
 def test_capture_blocks_geometry_changes(service):
     service.start_capture("birds")
     try:

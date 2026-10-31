@@ -125,6 +125,8 @@ function renderStatus(st) {
   $("#pill-capture").className = `pill rec${st.capture ? "" : " hidden"}`;
   $("#m-rate").textContent = st.line_rate_measured ? `${fmt(st.line_rate_measured, 0)} Hz` : "—";
   $("#m-lost").textContent = st.lost_frames;
+  $("#m-restarts").textContent = st.stream_restarts;
+  $("#m-restarts-box").classList.toggle("hidden", !st.stream_restarts);
   $("#error-bar").classList.toggle("hidden", !st.error && !st.warning);
   $("#error-text").textContent = st.error || st.warning || "";
 

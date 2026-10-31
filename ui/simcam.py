@@ -25,6 +25,9 @@ class SimCamera:
         self.realtime = realtime
         self.scene = "birds"
         self.prnu_done = False
+        # test hook: "grab" = delivers nothing until the grab restarts,
+        # "device" = nothing until the camera is reopened
+        self.stall: str | None = None
         self._birds = SimulatedLineScan(width=cfg.width_px, period=nominal_period,
                                         speed_error=0.02)
         self._open = False
@@ -70,6 +73,8 @@ class SimCamera:
 
     def open(self) -> None:
         self._open = True
+        if self.stall == "device":
+            self.stall = None
 
     def close(self) -> None:
         self._grabbing = False
@@ -85,6 +90,8 @@ class SimCamera:
 
     def start(self) -> None:
         self._grabbing = True
+        if self.stall == "grab":
+            self.stall = None
         self._next_due = time.monotonic()
 
     def stop(self) -> None:
@@ -94,6 +101,9 @@ class SimCamera:
         return 1000
 
     def retrieve(self, timeout_ms: int) -> Block | None:
+        if self.stall:
+            time.sleep(0.05)
+            raise TimeoutError("sim stall")
         n = int(self._nodes["Height"])
         if self.realtime:
             self._next_due += n / float(self._nodes["AcquisitionLineRate"])
